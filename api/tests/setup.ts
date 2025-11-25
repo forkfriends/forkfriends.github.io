@@ -57,4 +57,18 @@ await applyD1Migrations(env.DB, [
       `ALTER TABLE sessions ADD COLUMN close_time TEXT;`,
     ],
   },
+  {
+    name: '007_add_wait_tracking.sql',
+    queries: [
+      `ALTER TABLE parties ADD COLUMN called_at INTEGER;`,
+      `ALTER TABLE parties ADD COLUMN completed_at INTEGER;`,
+      `ALTER TABLE parties ADD COLUMN position_at_leave INTEGER;`,
+      `ALTER TABLE parties ADD COLUMN wait_ms_at_leave INTEGER;`,
+      `CREATE INDEX IF NOT EXISTS idx_parties_status_completed ON parties(status, completed_at);`,
+    ],
+  },
+  {
+    name: '008_add_eta_tracking.sql',
+    queries: [`ALTER TABLE parties ADD COLUMN estimated_wait_ms INTEGER;`],
+  },
 ]);

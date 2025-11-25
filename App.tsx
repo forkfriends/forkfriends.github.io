@@ -11,6 +11,7 @@ import JoinQueueScreen from './components/Join/JoinQueueScreen';
 import HostQueueScreen from './components/Host/HostQueueScreen';
 import GuestQueueScreen from './components/Guest/GuestQueueScreen';
 import PrivacyPolicyScreen from './components/PrivacyPolicy/PrivacyPolicyScreen';
+import AdminDashboardScreen from './components/Admin/AdminDashboardScreen';
 import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
 
@@ -44,6 +45,7 @@ const getScreenTitle = (screenName: string): string => {
     HostQueueScreen: 'Host Queue',
     GuestQueueScreen: 'Guest Queue',
     PrivacyPolicyScreen: 'Privacy Policy',
+    AdminDashboardScreen: 'Analytics',
   };
   return screenTitles[screenName] || screenName;
 };
@@ -76,7 +78,10 @@ export default function App() {
 
   return (
     <ModalProvider>
-      <NavigationContainer ref={navigationRef} onStateChange={handleStateChange} onReady={handleReady}>
+      <NavigationContainer
+        ref={navigationRef}
+        onStateChange={handleStateChange}
+        onReady={handleReady}>
         <StatusBar style="auto" />
         <Stack.Navigator
           initialRouteName="HomeScreen"
@@ -119,7 +124,11 @@ export default function App() {
             component={MakeQueueScreen}
             options={{ title: '' }}
           />
-          <Stack.Screen name="JoinQueueScreen" component={JoinQueueScreen} options={{ title: '' }} />
+          <Stack.Screen
+            name="JoinQueueScreen"
+            component={JoinQueueScreen}
+            options={{ title: '' }}
+          />
           <Stack.Screen
             name="GuestQueueScreen"
             component={GuestQueueScreen}
@@ -133,6 +142,11 @@ export default function App() {
           <Stack.Screen
             name="PrivacyPolicyScreen"
             component={PrivacyPolicyScreen}
+            options={{ title: '' }}
+          />
+          <Stack.Screen
+            name="AdminDashboardScreen"
+            component={AdminDashboardScreen}
             options={{ title: '' }}
           />
         </Stack.Navigator>

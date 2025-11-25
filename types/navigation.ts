@@ -3,6 +3,7 @@ export type RootStackParamList = {
   MakeQueueScreen: { id: string } | undefined;
   JoinQueueScreen: { id: string; code?: string } | undefined;
   PrivacyPolicyScreen: undefined;
+  AdminDashboardScreen: undefined;
   HostQueueScreen: {
     code: string;
     sessionId: string;
