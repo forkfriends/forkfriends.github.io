@@ -291,10 +291,6 @@ export default {
       const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
 
-      // Helper to build redirect URL (uses stored redirectUri or falls back to default)
-      const buildRedirectUrl = (redirectUri: string | null) =>
-        new URL(redirectUri || DEFAULT_APP_BASE_URL);
-
       // For early errors before state validation, we need to try to get redirectUri from state
       // But state validation consumes it, so for OAuth errors we validate without consuming
       let earlyRedirectUri: string | null = null;
