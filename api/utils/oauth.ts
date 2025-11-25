@@ -728,7 +728,8 @@ export async function cleanupExpiredAuth(db: D1Database): Promise<void> {
 }
 
 // Admin emails whitelist
-const ADMIN_EMAILS = ['me@obinnanwachukwu.com'];
+// Set ADMIN_EMAILS as a comma-separated list in your environment, e.g. ADMIN_EMAILS="admin1@example.com,admin2@example.com"
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ? process.env.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase()) : []);
 
 /**
  * Check if a user is an admin
