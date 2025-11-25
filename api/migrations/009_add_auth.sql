@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
-  github_id INTEGER UNIQUE NOT NULL,
+  github_id INTEGER UNIQUE,
   github_username TEXT NOT NULL,
   github_avatar_url TEXT,
   email TEXT,
