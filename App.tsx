@@ -1,8 +1,24 @@
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Pressable, Linking, StyleSheet, Platform } from 'react-native';
-import { Github, ArrowLeft } from 'lucide-react-native';
+import {
+  NavigationContainer,
+  useNavigationContainerRef,
+  useNavigation,
+} from '@react-navigation/native';
+import {
+  createNativeStackNavigator,
+  NativeStackNavigationProp,
+} from '@react-navigation/native-stack';
+import {
+  Pressable,
+  StyleSheet,
+  Platform,
+  Image,
+  View,
+  ActivityIndicator,
+  Text,
+  Modal,
+} from 'react-native';
+import { ArrowLeft, LogOut, User } from 'lucide-react-native';
 import './global.css';
 
 import HomeScreen from './components/Home/HomeScreen';
@@ -12,34 +28,113 @@ import HostQueueScreen from './components/Host/HostQueueScreen';
 import GuestQueueScreen from './components/Guest/GuestQueueScreen';
 import PrivacyPolicyScreen from './components/PrivacyPolicy/PrivacyPolicyScreen';
 import AdminDashboardScreen from './components/Admin/AdminDashboardScreen';
+import LoginScreen from './components/Login/LoginScreen';
 import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import React, { useState } from 'react';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const GITHUB_URL = 'https://github.com/forkfriends/queueup';
 
 const headerStyles = StyleSheet.create({
-  iconButton: {
-    padding: 10,
-    marginRight: 16,
-    borderRadius: 999,
-    borderWidth: 1,
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  loginButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#111',
+  },
+  loginButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  avatarButton: {
+    padding: 2,
+  },
+  avatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
     borderColor: '#cfd1d4',
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1.5,
+  },
+  avatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#cfd1d4',
+    backgroundColor: '#e5e5e5',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   backButton: {
     padding: 8,
     marginLeft: 8,
+  },
+  // Dropdown menu styles
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+  },
+  menuContainer: {
+    marginTop: Platform.OS === 'web' ? 60 : 100,
+    marginRight: 16,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    minWidth: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  menuHeader: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  menuUsername: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111',
+  },
+  menuEmail: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    gap: 12,
+  },
+  menuItemDestructive: {
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  menuItemText: {
+    fontSize: 15,
+    color: '#111',
+  },
+  menuItemTextDestructive: {
+    color: '#dc2626',
   },
 });
 
 const getScreenTitle = (screenName: string): string => {
   const screenTitles: Record<string, string> = {
     HomeScreen: 'Home',
+    LoginScreen: 'Login',
     MakeQueueScreen: 'Make Queue',
     JoinQueueScreen: 'Join Queue',
     HostQueueScreen: 'Host Queue',
@@ -50,7 +145,95 @@ const getScreenTitle = (screenName: string): string => {
   return screenTitles[screenName] || screenName;
 };
 
-export default function App() {
+function HeaderRight() {
+  const { user, isLoading, logout } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [menuVisible, setMenuVisible] = useState(false);
+
+  if (isLoading) {
+    return (
+      <View style={headerStyles.headerRight}>
+        <ActivityIndicator size="small" color="#666" />
+      </View>
+    );
+  }
+
+  if (user) {
+    // Email is the primary identifier, fall back to name/username
+    const displayName =
+      user.email || user.google_email || user.google_name || user.github_username || 'User';
+    const avatarUrl = user.github_avatar_url || user.google_avatar_url;
+
+    return (
+      <View style={headerStyles.headerRight}>
+        <Pressable
+          style={headerStyles.avatarButton}
+          accessibilityRole="button"
+          accessibilityLabel="Open user menu"
+          hitSlop={8}
+          onPress={() => setMenuVisible(true)}>
+          {avatarUrl ? (
+            <Image
+              source={{ uri: avatarUrl }}
+              style={headerStyles.avatar}
+              accessibilityLabel={`${displayName}'s avatar`}
+            />
+          ) : (
+            <View style={headerStyles.avatarPlaceholder}>
+              <User size={20} color="#666" />
+            </View>
+          )}
+        </Pressable>
+
+        <Modal
+          visible={menuVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuVisible(false)}>
+          <Pressable style={headerStyles.menuOverlay} onPress={() => setMenuVisible(false)}>
+            <Pressable style={headerStyles.menuContainer} onPress={(e) => e.stopPropagation()}>
+              {/* User info header */}
+              <View style={headerStyles.menuHeader}>
+                <Text style={headerStyles.menuUsername}>{displayName}</Text>
+              </View>
+
+              {/* Logout button */}
+              <Pressable
+                style={[headerStyles.menuItem, headerStyles.menuItemDestructive]}
+                onPress={() => {
+                  setMenuVisible(false);
+                  logout();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Log out">
+                <LogOut size={18} color="#dc2626" />
+                <Text style={[headerStyles.menuItemText, headerStyles.menuItemTextDestructive]}>
+                  Log out
+                </Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      </View>
+    );
+  }
+
+  // Not logged in - show Login button
+  return (
+    <View style={headerStyles.headerRight}>
+      <Pressable
+        style={headerStyles.loginButton}
+        accessibilityRole="button"
+        accessibilityLabel="Log in"
+        hitSlop={8}
+        onPress={() => navigation.navigate('LoginScreen')}>
+        <Text style={headerStyles.loginButtonText}>Login</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function AppNavigator() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
 
   const updateTitle = () => {
@@ -63,7 +246,6 @@ export default function App() {
       const screenTitle = getScreenTitle(currentRoute.name);
       document.title = `QueueUp - ${screenTitle}`;
     } else {
-      // Fallback before navigation state is ready (e.g. first load)
       document.title = 'QueueUp - Home';
     }
   };
@@ -77,80 +259,66 @@ export default function App() {
   };
 
   return (
-    <ModalProvider>
-      <NavigationContainer
-        ref={navigationRef}
-        onStateChange={handleStateChange}
-        onReady={handleReady}>
-        <StatusBar style="auto" />
-        <Stack.Navigator
-          initialRouteName="HomeScreen"
-          screenOptions={({ navigation, route }) => ({
-            headerRight: () => (
+    <NavigationContainer
+      ref={navigationRef}
+      onStateChange={handleStateChange}
+      onReady={handleReady}>
+      <StatusBar style="auto" />
+      <Stack.Navigator
+        initialRouteName="HomeScreen"
+        screenOptions={({ navigation, route }) => ({
+          headerRight: () => <HeaderRight />,
+          headerBackTitleVisible: false,
+          headerLeft: () => {
+            if (route.name === 'HomeScreen') {
+              return null;
+            }
+            if (!navigation.canGoBack()) {
+              return null;
+            }
+            return (
               <Pressable
-                style={headerStyles.iconButton}
-                accessibilityRole="link"
-                accessibilityLabel="View ForkFriends on GitHub"
+                style={headerStyles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
                 hitSlop={12}
-                onPress={() => {
-                  void Linking.openURL(GITHUB_URL);
-                }}>
-                <Github size={22} color="#111" strokeWidth={2} />
+                onPress={() => navigation.goBack()}>
+                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
               </Pressable>
-            ),
-            headerBackTitleVisible: false,
-            headerLeft: () => {
-              if (route.name === 'HomeScreen') {
-                return null;
-              }
-              if (!navigation.canGoBack()) {
-                return null;
-              }
-              return (
-                <Pressable
-                  style={headerStyles.backButton}
-                  accessibilityRole="button"
-                  accessibilityLabel="Go back"
-                  hitSlop={12}
-                  onPress={() => navigation.goBack()}>
-                  <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
-                </Pressable>
-              );
-            },
-          })}>
-          <Stack.Screen name="HomeScreen" component={HomeScreen} options={{ title: '' }} />
-          <Stack.Screen
-            name="MakeQueueScreen"
-            component={MakeQueueScreen}
-            options={{ title: '' }}
-          />
-          <Stack.Screen
-            name="JoinQueueScreen"
-            component={JoinQueueScreen}
-            options={{ title: '' }}
-          />
-          <Stack.Screen
-            name="GuestQueueScreen"
-            component={GuestQueueScreen}
-            options={{ title: '' }}
-          />
-          <Stack.Screen
-            name="HostQueueScreen"
-            component={HostQueueScreen}
-            options={{ title: '' }}
-          />
-          <Stack.Screen
-            name="PrivacyPolicyScreen"
-            component={PrivacyPolicyScreen}
-            options={{ title: '' }}
-          />
-          <Stack.Screen
-            name="AdminDashboardScreen"
-            component={AdminDashboardScreen}
-            options={{ title: '' }}
-          />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </ModalProvider>
+            );
+          },
+        })}>
+        <Stack.Screen name="HomeScreen" component={HomeScreen} options={{ title: '' }} />
+        <Stack.Screen name="LoginScreen" component={LoginScreen} options={{ title: '' }} />
+        <Stack.Screen name="MakeQueueScreen" component={MakeQueueScreen} options={{ title: '' }} />
+        <Stack.Screen name="JoinQueueScreen" component={JoinQueueScreen} options={{ title: '' }} />
+        <Stack.Screen
+          name="GuestQueueScreen"
+          component={GuestQueueScreen}
+          options={{ title: '' }}
+        />
+        <Stack.Screen name="HostQueueScreen" component={HostQueueScreen} options={{ title: '' }} />
+        <Stack.Screen
+          name="PrivacyPolicyScreen"
+          component={PrivacyPolicyScreen}
+          options={{ title: '' }}
+        />
+        <Stack.Screen
+          name="AdminDashboardScreen"
+          component={AdminDashboardScreen}
+          options={{ title: '' }}
+        />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <ModalProvider>
+        <AppNavigator />
+      </ModalProvider>
+    </AuthProvider>
   );
 }

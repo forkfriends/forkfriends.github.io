@@ -13,6 +13,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
 import { API_BASE_URL } from '../../lib/backend';
+import { useAuth } from '../../contexts/AuthContext';
 import styles from './AdminDashboardScreen.Styles';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AdminDashboardScreen'>;
@@ -97,7 +98,23 @@ const PERIOD_OPTIONS = [
   { label: '90d', days: 90 },
 ];
 
+// Storage key must match AuthContext
+const AUTH_SESSION_KEY = 'queueup-auth-session';
+
+// Get session token for API calls (needed for cross-origin like localhost)
+function getSessionToken(): string | null {
+  if (Platform.OS === 'web') {
+    try {
+      return localStorage.getItem(AUTH_SESSION_KEY);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export default function AdminDashboardScreen(_props: Props) {
+  const { user, isLoading: authLoading, isAdmin, login } = useAuth();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,8 +124,22 @@ export default function AdminDashboardScreen(_props: Props) {
   const fetchAnalytics = useCallback(async (days: number) => {
     try {
       setError(null);
-      const response = await fetch(`${API_BASE_URL}/api/analytics?days=${days}`);
+      const headers: HeadersInit = {};
+      const token = getSessionToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(`${API_BASE_URL}/api/analytics?days=${days}`, {
+        headers,
+        credentials: 'include',
+      });
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Not authenticated');
+        }
+        if (response.status === 403) {
+          throw new Error('Access denied - admin privileges required');
+        }
         throw new Error('Failed to load analytics');
       }
       const result = await response.json();
@@ -122,9 +153,11 @@ export default function AdminDashboardScreen(_props: Props) {
   }, []);
 
   useEffect(() => {
-    setLoading(true);
-    void fetchAnalytics(selectedDays);
-  }, [selectedDays, fetchAnalytics]);
+    if (user) {
+      setLoading(true);
+      void fetchAnalytics(selectedDays);
+    }
+  }, [selectedDays, fetchAnalytics, user]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -132,12 +165,42 @@ export default function AdminDashboardScreen(_props: Props) {
   }, [selectedDays, fetchAnalytics]);
 
   const handleExport = useCallback(
-    (exportType: 'parties' | 'events' | 'queues') => {
-      const url = `${API_BASE_URL}/api/analytics/export?days=${selectedDays}&type=${exportType}`;
-      if (Platform.OS === 'web') {
-        window.open(url, '_blank');
-      } else {
-        void Linking.openURL(url);
+    async (exportType: 'parties' | 'events' | 'queues') => {
+      try {
+        const headers: HeadersInit = {};
+        const token = getSessionToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/analytics/export?days=${selectedDays}&type=${exportType}`,
+          {
+            headers,
+            credentials: 'include',
+          }
+        );
+
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            setError('Not authorized to export data');
+            return;
+          }
+          throw new Error('Export failed');
+        }
+
+        // Get the blob and trigger download
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `queueup-${exportType}-${selectedDays}d.csv`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Export failed');
       }
     },
     [selectedDays]
@@ -275,6 +338,55 @@ export default function AdminDashboardScreen(_props: Props) {
       </View>
     );
   };
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#111" />
+          <Text style={styles.loadingText}>Checking authentication...</Text>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Show login prompt if not authenticated
+  if (!user) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.title}>Analytics Dashboard</Text>
+          <Text style={[styles.loadingText, { marginTop: 16, marginBottom: 24 }]}>
+            Please log in to view analytics
+          </Text>
+          <Pressable style={styles.retryButton} onPress={login}>
+            <Text style={styles.retryButtonText}>Log in with GitHub</Text>
+          </Pressable>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Show access denied if not admin
+  if (!isAdmin) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.title}>Access Denied</Text>
+          <Text style={[styles.loadingText, { marginTop: 16, marginBottom: 8, color: '#dc2626' }]}>
+            You do not have permission to access this page.
+          </Text>
+          <Text style={[styles.loadingText, { marginBottom: 24, color: '#666' }]}>
+            Only administrators can view the analytics dashboard.
+          </Text>
+          <Text style={[styles.loadingText, { fontSize: 12, color: '#999' }]}>
+            Logged in as: {user.github_username}
+          </Text>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
 
   if (loading && !data) {
     return (

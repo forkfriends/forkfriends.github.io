@@ -5,6 +5,29 @@ import {
   generateHostCookieValue,
   verifyHostCookie,
 } from './utils/auth';
+import {
+  buildClearSessionCookie,
+  buildGitHubAuthUrl,
+  buildGoogleAuthUrl,
+  buildSessionCookie,
+  createExchangeToken,
+  createOAuthState,
+  createSession,
+  deleteSession,
+  exchangeCodeForToken,
+  exchangeGoogleCodeForToken,
+  fetchGitHubUser,
+  fetchGoogleUser,
+  findOrCreateUser,
+  findOrCreateUserFromGoogle,
+  getSessionFromRequest,
+  isAdmin,
+  isValidRedirectUri,
+  requireAdmin,
+  validateExchangeToken,
+  validateOAuthState,
+  validateSession,
+} from './utils/oauth';
 import { logAnalyticsEvent } from './analytics';
 export { QueueDO } from './queue-do';
 
@@ -22,6 +45,12 @@ export interface Env {
   TURNSTILE_BYPASS?: string;
   TEST_MODE?: string;
   APP_BASE_URL?: string;
+  // GitHub OAuth
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  // Google OAuth
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
 }
 
 const DEFAULT_APP_BASE_URL = 'https://forkfriends.github.io/';
@@ -71,6 +100,444 @@ export default {
     if (request.method === 'OPTIONS') {
       return applyCors(new Response(null, { status: 204 }), corsOrigin, undefined, true);
     }
+
+    // ============================================
+    // GitHub OAuth Authentication Routes
+    // ============================================
+
+    // Start GitHub OAuth flow
+    if (request.method === 'GET' && url.pathname === '/api/auth/github') {
+      if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
+        return applyCors(jsonError('GitHub OAuth not configured', 500), corsOrigin);
+      }
+
+      const platform = (url.searchParams.get('platform') as 'web' | 'native') || 'web';
+      const redirectUri = url.searchParams.get('redirect_uri') || null;
+
+      // Validate redirect_uri if provided (for native apps)
+      if (redirectUri && !isValidRedirectUri(redirectUri)) {
+        return applyCors(jsonError('Invalid redirect_uri', 400), corsOrigin);
+      }
+
+      try {
+        // Create and store OAuth state
+        const state = await createOAuthState(env.DB, platform, redirectUri);
+
+        // Build callback URL (always points to our worker)
+        const callbackUrl = new URL('/api/auth/github/callback', url.origin).toString();
+
+        // Build GitHub authorization URL
+        const githubAuthUrl = buildGitHubAuthUrl(env.GITHUB_CLIENT_ID, callbackUrl, state);
+
+        // Redirect to GitHub
+        return Response.redirect(githubAuthUrl, 302);
+      } catch (e) {
+        console.error('OAuth start error:', e);
+        return applyCors(jsonError('Failed to start OAuth flow', 500), corsOrigin);
+      }
+    }
+
+    // GitHub OAuth callback
+    if (request.method === 'GET' && url.pathname === '/api/auth/github/callback') {
+      if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
+        return applyCors(jsonError('GitHub OAuth not configured', 500), corsOrigin);
+      }
+
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const error = url.searchParams.get('error');
+
+      // Handle OAuth error
+      if (error) {
+        const errorDesc = url.searchParams.get('error_description') || 'Authorization denied';
+        console.error('GitHub OAuth error:', error, errorDesc);
+        const failureUrl = new URL(DEFAULT_APP_BASE_URL);
+        failureUrl.searchParams.set('auth', 'error');
+        failureUrl.searchParams.set('error', errorDesc);
+        return Response.redirect(failureUrl.toString(), 302);
+      }
+
+      if (!code || !state) {
+        return applyCors(jsonError('Missing code or state', 400), corsOrigin);
+      }
+
+      try {
+        // Validate state
+        const stateData = await validateOAuthState(env.DB, state);
+        if (!stateData) {
+          const failureUrl = new URL(DEFAULT_APP_BASE_URL);
+          failureUrl.searchParams.set('auth', 'error');
+          failureUrl.searchParams.set('error', 'Invalid or expired state');
+          return Response.redirect(failureUrl.toString(), 302);
+        }
+
+        // Exchange code for token
+        const callbackUrl = new URL('/api/auth/github/callback', url.origin).toString();
+        const accessToken = await exchangeCodeForToken(
+          env.GITHUB_CLIENT_ID,
+          env.GITHUB_CLIENT_SECRET,
+          code,
+          callbackUrl
+        );
+
+        if (!accessToken) {
+          const failureUrl = new URL(DEFAULT_APP_BASE_URL);
+          failureUrl.searchParams.set('auth', 'error');
+          failureUrl.searchParams.set('error', 'Failed to exchange code for token');
+          return Response.redirect(failureUrl.toString(), 302);
+        }
+
+        // Fetch GitHub user info
+        const githubUser = await fetchGitHubUser(accessToken);
+        if (!githubUser) {
+          const failureUrl = new URL(DEFAULT_APP_BASE_URL);
+          failureUrl.searchParams.set('auth', 'error');
+          failureUrl.searchParams.set('error', 'Failed to fetch user info');
+          return Response.redirect(failureUrl.toString(), 302);
+        }
+
+        // Find or create user
+        const user = await findOrCreateUser(env.DB, githubUser);
+
+        // Create session
+        const session = await createSession(env.DB, user.id);
+
+        // Handle redirect based on platform and origin
+        const appUrl = stateData.redirectUri || DEFAULT_APP_BASE_URL;
+        const successUrl = new URL(appUrl);
+
+        // Check if this is a cross-origin redirect (different host than API)
+        // Cross-origin includes: native apps, localhost dev, or any non-same-origin
+        const isCrossOrigin =
+          stateData.platform === 'native' ||
+          successUrl.hostname === 'localhost' ||
+          successUrl.hostname === '127.0.0.1' ||
+          successUrl.origin !== url.origin;
+
+        if (isCrossOrigin) {
+          // For cross-origin: use exchange token (cookies won't work cross-origin)
+          const exchangeToken = await createExchangeToken(env.DB, user.id);
+          successUrl.searchParams.set('exchange_token', exchangeToken);
+          successUrl.searchParams.set('auth', 'success');
+          return Response.redirect(successUrl.toString(), 302);
+        }
+
+        // For same-origin web: set HttpOnly cookie and redirect
+        successUrl.searchParams.set('auth', 'success');
+
+        const sessionCookieMaxAge = 30 * 24 * 60 * 60; // 30 days
+        const headers = new Headers({
+          Location: successUrl.toString(),
+        });
+        headers.append('Set-Cookie', buildSessionCookie(session.id, sessionCookieMaxAge));
+
+        return new Response(null, { status: 302, headers });
+      } catch (e) {
+        console.error('OAuth callback error:', e);
+        const failureUrl = new URL(DEFAULT_APP_BASE_URL);
+        failureUrl.searchParams.set('auth', 'error');
+        failureUrl.searchParams.set('error', 'Authentication failed');
+        return Response.redirect(failureUrl.toString(), 302);
+      }
+    }
+
+    // ============================================
+    // Google OAuth Authentication Routes
+    // ============================================
+
+    // Start Google OAuth flow
+    if (request.method === 'GET' && url.pathname === '/api/auth/google') {
+      if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+        return applyCors(jsonError('Google OAuth not configured', 500), corsOrigin);
+      }
+
+      const platform = (url.searchParams.get('platform') as 'web' | 'native') || 'web';
+      const redirectUri = url.searchParams.get('redirect_uri') || null;
+
+      console.log('[Google OAuth Start] platform:', platform, 'redirectUri:', redirectUri);
+
+      // Validate redirect_uri if provided (for native apps)
+      if (redirectUri && !isValidRedirectUri(redirectUri)) {
+        console.log('[Google OAuth Start] Invalid redirect_uri:', redirectUri);
+        return applyCors(jsonError('Invalid redirect_uri', 400), corsOrigin);
+      }
+
+      try {
+        // Create and store OAuth state with provider
+        const state = await createOAuthState(env.DB, platform, redirectUri, 'google');
+        console.log('[Google OAuth Start] Created state, redirectUri stored:', redirectUri);
+
+        // Build callback URL (always points to our worker)
+        const callbackUrl = new URL('/api/auth/google/callback', url.origin).toString();
+
+        // Build Google authorization URL
+        const googleAuthUrl = buildGoogleAuthUrl(env.GOOGLE_CLIENT_ID, callbackUrl, state);
+
+        // Redirect to Google
+        return Response.redirect(googleAuthUrl, 302);
+      } catch (e) {
+        console.error('Google OAuth start error:', e);
+        return applyCors(jsonError('Failed to start OAuth flow', 500), corsOrigin);
+      }
+    }
+
+    // Google OAuth callback
+    if (request.method === 'GET' && url.pathname === '/api/auth/google/callback') {
+      if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+        return applyCors(jsonError('Google OAuth not configured', 500), corsOrigin);
+      }
+
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const error = url.searchParams.get('error');
+
+      // Helper to build redirect URL (uses stored redirectUri or falls back to default)
+      const buildRedirectUrl = (redirectUri: string | null) =>
+        new URL(redirectUri || DEFAULT_APP_BASE_URL);
+
+      // For early errors before state validation, we need to try to get redirectUri from state
+      // But state validation consumes it, so for OAuth errors we validate without consuming
+      let earlyRedirectUri: string | null = null;
+      if (state && (error || !code)) {
+        // Peek at state to get redirectUri for error redirect (don't consume yet)
+        const stateRow = await env.DB.prepare(
+          'SELECT redirect_uri FROM oauth_states WHERE state = ?1'
+        )
+          .bind(state)
+          .first<{ redirect_uri: string | null }>();
+        earlyRedirectUri = stateRow?.redirect_uri || null;
+        console.log(
+          '[Google OAuth Callback] Early state lookup - stateRow:',
+          stateRow,
+          'earlyRedirectUri:',
+          earlyRedirectUri
+        );
+      }
+
+      // Handle OAuth error from Google
+      if (error) {
+        const errorDesc = url.searchParams.get('error_description') || 'Authorization denied';
+        console.error('Google OAuth error:', error, errorDesc);
+        // Clean up the state since we won't use it
+        if (state) {
+          await env.DB.prepare('DELETE FROM oauth_states WHERE state = ?1').bind(state).run();
+        }
+        const failureUrl = buildRedirectUrl(earlyRedirectUri);
+        failureUrl.searchParams.set('auth', 'error');
+        failureUrl.searchParams.set('error', errorDesc);
+        return Response.redirect(failureUrl.toString(), 302);
+      }
+
+      if (!code || !state) {
+        return applyCors(jsonError('Missing code or state', 400), corsOrigin);
+      }
+
+      try {
+        // Validate state (this consumes it)
+        const stateData = await validateOAuthState(env.DB, state);
+        console.log('[Google OAuth Callback] Validated state:', stateData);
+        if (!stateData) {
+          const failureUrl = buildRedirectUrl(earlyRedirectUri);
+          failureUrl.searchParams.set('auth', 'error');
+          failureUrl.searchParams.set('error', 'Invalid or expired state');
+          return Response.redirect(failureUrl.toString(), 302);
+        }
+
+        // Now we have the proper redirectUri from validated state
+        const appUrl = stateData.redirectUri || DEFAULT_APP_BASE_URL;
+
+        // Exchange code for token
+        const callbackUrl = new URL('/api/auth/google/callback', url.origin).toString();
+        const accessToken = await exchangeGoogleCodeForToken(
+          env.GOOGLE_CLIENT_ID,
+          env.GOOGLE_CLIENT_SECRET,
+          code,
+          callbackUrl
+        );
+
+        if (!accessToken) {
+          const failureUrl = new URL(appUrl);
+          failureUrl.searchParams.set('auth', 'error');
+          failureUrl.searchParams.set('error', 'Failed to exchange code for token');
+          return Response.redirect(failureUrl.toString(), 302);
+        }
+
+        // Fetch Google user info
+        const googleUser = await fetchGoogleUser(accessToken);
+        if (!googleUser) {
+          const failureUrl = new URL(appUrl);
+          failureUrl.searchParams.set('auth', 'error');
+          failureUrl.searchParams.set('error', 'Failed to fetch user info');
+          return Response.redirect(failureUrl.toString(), 302);
+        }
+
+        // Find or create user
+        const user = await findOrCreateUserFromGoogle(env.DB, googleUser);
+
+        // Create session
+        const session = await createSession(env.DB, user.id);
+
+        // Handle redirect based on platform and origin
+        const successUrl = new URL(appUrl);
+
+        // Check if this is a cross-origin redirect (different host than API)
+        const isCrossOrigin =
+          stateData.platform === 'native' ||
+          successUrl.hostname === 'localhost' ||
+          successUrl.hostname === '127.0.0.1' ||
+          successUrl.origin !== url.origin;
+
+        if (isCrossOrigin) {
+          // For cross-origin: use exchange token (cookies won't work cross-origin)
+          const exchangeToken = await createExchangeToken(env.DB, user.id);
+          successUrl.searchParams.set('exchange_token', exchangeToken);
+          successUrl.searchParams.set('auth', 'success');
+          return Response.redirect(successUrl.toString(), 302);
+        }
+
+        // For same-origin web: set HttpOnly cookie and redirect
+        successUrl.searchParams.set('auth', 'success');
+
+        const sessionCookieMaxAge = 30 * 24 * 60 * 60; // 30 days
+        const headers = new Headers({
+          Location: successUrl.toString(),
+        });
+        headers.append('Set-Cookie', buildSessionCookie(session.id, sessionCookieMaxAge));
+
+        return new Response(null, { status: 302, headers });
+      } catch (e) {
+        console.error('Google OAuth callback error:', e);
+        const failureUrl = buildRedirectUrl(earlyRedirectUri);
+        failureUrl.searchParams.set('auth', 'error');
+        failureUrl.searchParams.set('error', 'Authentication failed');
+        return Response.redirect(failureUrl.toString(), 302);
+      }
+    }
+
+    // Exchange token for session (native apps)
+    if (request.method === 'POST' && url.pathname === '/api/auth/exchange') {
+      try {
+        const payload = await readJson(request);
+        const exchangeToken = payload?.exchange_token;
+
+        if (!exchangeToken || typeof exchangeToken !== 'string') {
+          return applyCors(jsonError('exchange_token required', 400), corsOrigin);
+        }
+
+        // Validate and consume exchange token
+        const userId = await validateExchangeToken(env.DB, exchangeToken);
+        if (!userId) {
+          return applyCors(jsonError('Invalid or expired exchange token', 401), corsOrigin);
+        }
+
+        // Create a new session
+        const session = await createSession(env.DB, userId);
+
+        // Get user info
+        const user = await validateSession(env.DB, session.id);
+
+        return applyCors(
+          new Response(
+            JSON.stringify({
+              session_token: session.id,
+              user: user
+                ? {
+                    id: user.id,
+                    github_username: user.github_username,
+                    github_avatar_url: user.github_avatar_url,
+                    google_name: user.google_name,
+                    google_email: user.google_email,
+                    google_avatar_url: user.google_avatar_url,
+                    email: user.email,
+                    is_admin: isAdmin(user),
+                  }
+                : null,
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          ),
+          corsOrigin
+        );
+      } catch (e) {
+        console.error('Exchange token error:', e);
+        return applyCors(jsonError('Token exchange failed', 500), corsOrigin);
+      }
+    }
+
+    // Get current user
+    if (request.method === 'GET' && url.pathname === '/api/auth/me') {
+      try {
+        const sessionId = getSessionFromRequest(request);
+        if (!sessionId) {
+          return applyCors(
+            new Response(JSON.stringify({ user: null }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+            corsOrigin
+          );
+        }
+
+        const user = await validateSession(env.DB, sessionId);
+        if (!user) {
+          return applyCors(
+            new Response(JSON.stringify({ user: null }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+            corsOrigin
+          );
+        }
+
+        return applyCors(
+          new Response(
+            JSON.stringify({
+              user: {
+                id: user.id,
+                github_username: user.github_username,
+                github_avatar_url: user.github_avatar_url,
+                google_name: user.google_name,
+                google_email: user.google_email,
+                google_avatar_url: user.google_avatar_url,
+                email: user.email,
+                is_admin: isAdmin(user),
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          ),
+          corsOrigin
+        );
+      } catch (e) {
+        console.error('Auth me error:', e);
+        return applyCors(jsonError('Failed to get user', 500), corsOrigin);
+      }
+    }
+
+    // Logout
+    if (request.method === 'POST' && url.pathname === '/api/auth/logout') {
+      try {
+        const sessionId = getSessionFromRequest(request);
+        if (sessionId) {
+          await deleteSession(env.DB, sessionId);
+        }
+
+        const headers = new Headers({
+          'content-type': 'application/json',
+        });
+        headers.append('Set-Cookie', buildClearSessionCookie());
+
+        return applyCors(
+          new Response(JSON.stringify({ success: true }), { status: 200, headers }),
+          corsOrigin
+        );
+      } catch (e) {
+        console.error('Logout error:', e);
+        return applyCors(jsonError('Logout failed', 500), corsOrigin);
+      }
+    }
+
+    // ============================================
+    // Push API Routes
+    // ============================================
 
     // Push API: VAPID public key
     if (request.method === 'GET' && url.pathname === '/api/push/vapid') {
@@ -133,6 +600,12 @@ export default {
 
     // Analytics dashboard data
     if (request.method === 'GET' && url.pathname === '/api/analytics') {
+      // Require admin authentication
+      const { error: adminError } = await requireAdmin(env.DB, request);
+      if (adminError) {
+        return applyCors(adminError, corsOrigin);
+      }
+
       try {
         const days = parseInt(url.searchParams.get('days') || '7', 10);
         const since = Math.floor(Date.now() / 1000) - days * 24 * 60 * 60;
@@ -435,6 +908,12 @@ export default {
 
     // Analytics CSV export endpoint
     if (request.method === 'GET' && url.pathname === '/api/analytics/export') {
+      // Require admin authentication
+      const { error: adminError } = await requireAdmin(env.DB, request);
+      if (adminError) {
+        return applyCors(adminError, corsOrigin);
+      }
+
       try {
         const days = parseInt(url.searchParams.get('days') || '7', 10);
         const dataType = url.searchParams.get('type') || 'parties';
@@ -594,6 +1073,12 @@ export default {
 
     // Abandonment Risk Model endpoint
     if (request.method === 'GET' && url.pathname === '/api/analytics/abandonment-model') {
+      // Require admin authentication
+      const { error: adminError } = await requireAdmin(env.DB, request);
+      if (adminError) {
+        return applyCors(adminError, corsOrigin);
+      }
+
       try {
         // Get historical abandonment patterns by wait time bucket
         const abandonmentByWait = await env.DB.prepare(
@@ -677,6 +1162,12 @@ export default {
 
     // Throughput Forecasting endpoint
     if (request.method === 'GET' && url.pathname === '/api/analytics/throughput') {
+      // Require admin authentication
+      const { error: adminError } = await requireAdmin(env.DB, request);
+      if (adminError) {
+        return applyCors(adminError, corsOrigin);
+      }
+
       try {
         // Hourly patterns - average parties served per hour
         const hourlyPattern = await env.DB.prepare(
