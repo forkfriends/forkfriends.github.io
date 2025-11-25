@@ -197,7 +197,7 @@ export default {
         }
 
         // Find or create user
-        const user = await findOrCreateUser(env.DB, githubUser);
+        const user = await findOrCreateUserFromGitHub(env.DB, githubUser);
 
         // Create session
         const session = await createSession(env.DB, user.id);
