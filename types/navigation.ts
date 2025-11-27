@@ -8,8 +8,8 @@ export type RootStackParamList = {
   HostDashboardScreen: undefined;
   HostQueueScreen: {
     code: string;
-    sessionId: string;
-    wsUrl: string;
+    sessionId?: string; // Optional - can be recovered from storage on page refresh
+    wsUrl?: string; // Optional - can be recovered from storage on page refresh
     joinUrl?: string;
     hostAuthToken?: string;
     eventName?: string;
@@ -22,7 +22,7 @@ export type RootStackParamList = {
   };
   GuestQueueScreen: {
     code: string;
-    partyId: string;
+    partyId?: string; // Optional - can be recovered from storage on page refresh
     sessionId?: string | null;
     initialPosition?: number;
     initialAheadCount?: number;

@@ -46,8 +46,47 @@ const linking = {
       LoginScreen: 'login',
       MakeQueueScreen: 'make',
       JoinQueueScreen: 'join/:code?',
-      GuestQueueScreen: 'queue/:code',
-      HostQueueScreen: 'host/:code',
+      // Only use the code in the URL path - sensitive params are passed via
+      // navigation state and recovered from storage on page refresh
+      GuestQueueScreen: {
+        path: 'queue/:code',
+        parse: {
+          code: (code: string) => code,
+        },
+        stringify: {
+          code: (code: string) => code,
+          // Exclude sensitive params from URL
+          partyId: () => undefined as unknown as string,
+          sessionId: () => undefined as unknown as string,
+          initialPosition: () => undefined as unknown as string,
+          initialAheadCount: () => undefined as unknown as string,
+          initialQueueLength: () => undefined as unknown as string,
+          initialEtaMs: () => undefined as unknown as string,
+          guestName: () => undefined as unknown as string,
+          partySize: () => undefined as unknown as string,
+        },
+      },
+      HostQueueScreen: {
+        path: 'host/:code',
+        parse: {
+          code: (code: string) => code,
+        },
+        stringify: {
+          code: (code: string) => code,
+          // Exclude sensitive params from URL
+          sessionId: () => undefined as unknown as string,
+          wsUrl: () => undefined as unknown as string,
+          hostAuthToken: () => undefined as unknown as string,
+          joinUrl: () => undefined as unknown as string,
+          eventName: () => undefined as unknown as string,
+          maxGuests: () => undefined as unknown as string,
+          location: () => undefined as unknown as string,
+          contactInfo: () => undefined as unknown as string,
+          openTime: () => undefined as unknown as string,
+          closeTime: () => undefined as unknown as string,
+          requiresAuth: () => undefined as unknown as string,
+        },
+      },
       PrivacyPolicyScreen: 'privacy',
       AdminDashboardScreen: 'admin',
       HostDashboardScreen: 'my-queues',

@@ -9,6 +9,7 @@ import {
   Pressable,
   ActivityIndicator,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -43,6 +44,8 @@ const ANALYTICS_SCREEN = 'join_queue';
 export default function JoinQueueScreen({ navigation, route }: Props) {
   const { showModal } = useModal();
   const { user, login } = useAuth();
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 900;
   const routeCode =
     route.params?.code && route.params.code.trim().length > 0
       ? route.params.code.trim().toUpperCase().slice(-6)
@@ -810,145 +813,182 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     </Modal>
   ) : null;
 
-  return (
-    <SafeAreaProvider style={styles.safe}>
-      <KeyboardAvoidingView
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
-        style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <Text style={styles.title}>Join Queue</Text>
+  const renderFormFields = () => (
+    <>
+      <Text style={styles.label}>Enter Key</Text>
+      <TextInput
+        placeholder="Value"
+        value={key}
+        onChangeText={setKey}
+        style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
+        autoCapitalize="none"
+        autoCorrect={false}
+        editable={!inQueue}
+        returnKeyType="done"
+      />
+      <Pressable style={styles.scanButton} onPress={handleOpenScanner}>
+        <Text style={styles.scanButtonText}>Scan QR Code</Text>
+      </Pressable>
 
-          <View style={styles.card}>
-            <Text style={styles.label}>Enter Key</Text>
-            <TextInput
-              placeholder="Value"
-              value={key}
-              onChangeText={setKey}
-              style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!inQueue}
-              returnKeyType="done"
-            />
-            <Pressable style={styles.scanButton} onPress={handleOpenScanner}>
-              <Text style={styles.scanButtonText}>Scan QR Code</Text>
-            </Pressable>
+      <Text style={styles.label}>Your Name</Text>
+      <TextInput
+        placeholder="(optional)"
+        value={name}
+        onChangeText={setName}
+        style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
+        editable={!inQueue}
+        returnKeyType="next"
+      />
 
-            <Text style={styles.label}>Your Name</Text>
-            <TextInput
-              placeholder="(optional)"
-              value={name}
-              onChangeText={setName}
-              style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
-              editable={!inQueue}
-              returnKeyType="next"
-            />
+      <Text style={styles.label}>Party Size</Text>
+      <View style={styles.sliderRow}>
+        <Text style={styles.sliderValue}>{partySize}</Text>
+        <Text style={styles.sliderHint}>guests</Text>
+      </View>
+      <Slider
+        style={styles.slider}
+        minimumValue={MIN_QUEUE_SIZE}
+        maximumValue={MAX_QUEUE_SIZE}
+        step={1}
+        value={partySize}
+        minimumTrackTintColor="#1f6feb"
+        maximumTrackTintColor="#d0d7de"
+        thumbTintColor="#1f6feb"
+        onValueChange={(value) => setPartySize(Math.round(value))}
+      />
 
-            <Text style={styles.label}>Party Size</Text>
-            <View style={styles.sliderRow}>
-              <Text style={styles.sliderValue}>{partySize}</Text>
-              <Text style={styles.sliderHint}>guests</Text>
-            </View>
-            <Slider
-              style={styles.slider}
-              minimumValue={MIN_QUEUE_SIZE}
-              maximumValue={MAX_QUEUE_SIZE}
-              step={1}
-              value={partySize}
-              minimumTrackTintColor="#1f6feb"
-              maximumTrackTintColor="#d0d7de"
-              thumbTintColor="#1f6feb"
-              onValueChange={(value) => setPartySize(Math.round(value))}
-            />
+      {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
+        <View style={{ marginVertical: 16, alignItems: 'center' }}>
+          <Turnstile
+            ref={turnstileRef}
+            siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
+            onSuccess={(token) => {
+              console.log('[QueueUp][Turnstile] Token received');
+              setTurnstileToken(token);
+            }}
+            onError={(error) => {
+              console.error('[QueueUp][Turnstile] Error:', error);
+              setTurnstileToken(null);
+            }}
+            onExpire={() => {
+              console.warn('[QueueUp][Turnstile] Token expired');
+              setTurnstileToken(null);
+            }}
+            onWidgetLoad={(widgetId) => {
+              console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
+            }}
+            options={{
+              theme: 'light',
+              size: 'normal',
+            }}
+          />
+        </View>
+      ) : null}
 
-            {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
-              <View style={{ marginVertical: 16, alignItems: 'center' }}>
-                <Turnstile
-                  ref={turnstileRef}
-                  siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
-                  onSuccess={(token) => {
-                    console.log('[QueueUp][Turnstile] Token received');
-                    setTurnstileToken(token);
-                  }}
-                  onError={(error) => {
-                    console.error('[QueueUp][Turnstile] Error:', error);
-                    setTurnstileToken(null);
-                  }}
-                  onExpire={() => {
-                    console.warn('[QueueUp][Turnstile] Token expired');
-                    setTurnstileToken(null);
-                  }}
-                  onWidgetLoad={(widgetId) => {
-                    console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
-                  }}
-                  options={{
-                    theme: 'light',
-                    size: 'normal',
-                  }}
-                />
-              </View>
-            ) : null}
+      {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
+        <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
+          Complete the verification above to join
+        </Text>
+      ) : null}
 
-            {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
-              <Text
-                style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
-                Complete the verification above to join
-              </Text>
-            ) : null}
+      <View style={styles.actionsRow}>
+        {inQueue ? (
+          <Pressable
+            style={[styles.leaveButton, leaveLoading ? styles.leaveButtonDisabled : undefined]}
+            onPress={confirmLeave}
+            disabled={leaveLoading}>
+            {leaveLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Leave Queue</Text>
+            )}
+          </Pressable>
+        ) : (
+          <Pressable
+            style={[
+              styles.button,
+              loading ||
+              (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
+                ? styles.buttonDisabled
+                : undefined,
+            ]}
+            onPress={onSubmit}
+            disabled={
+              loading ||
+              inQueue ||
+              (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
+            }>
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Join Queue</Text>
+            )}
+          </Pressable>
+        )}
+      </View>
+    </>
+  );
 
-            <View style={styles.actionsRow}>
-              {inQueue ? (
-                <Pressable
-                  style={[
-                    styles.leaveButton,
-                    leaveLoading ? styles.leaveButtonDisabled : undefined,
-                  ]}
-                  onPress={confirmLeave}
-                  disabled={leaveLoading}>
-                  {leaveLoading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>Leave Queue</Text>
-                  )}
-                </Pressable>
-              ) : (
-                <Pressable
-                  style={[
-                    styles.button,
-                    loading ||
-                    (isWeb &&
-                      Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) &&
-                      !turnstileToken)
-                      ? styles.buttonDisabled
-                      : undefined,
-                  ]}
-                  onPress={onSubmit}
-                  disabled={
-                    loading ||
-                    inQueue ||
-                    (isWeb &&
-                      Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) &&
-                      !turnstileToken)
-                  }>
-                  {loading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>Join Queue</Text>
-                  )}
-                </Pressable>
-              )}
-            </View>
-          </View>
+  const renderInfoPanel = () => (
+    <View style={styles.infoCard}>
+      <Text style={styles.infoTitle}>How It Works</Text>
 
-          {resultText ? (
-            <View style={styles.resultCard}>
-              <Text style={styles.resultText}>{resultText}</Text>
-              {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
-              {renderPushBell()}
-            </View>
-          ) : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
+      <View style={styles.infoSection}>
+        <View style={styles.infoStepNumber}>
+          <Text style={styles.infoStepNumberText}>1</Text>
+        </View>
+        <Text style={styles.infoStepTitle}>Enter the Queue Code</Text>
+        <Text style={styles.infoStepDescription}>
+          Get the 6-character code from the host or scan the QR code at the venue.
+        </Text>
+      </View>
+
+      <View style={styles.infoSection}>
+        <View style={styles.infoStepNumber}>
+          <Text style={styles.infoStepNumberText}>2</Text>
+        </View>
+        <Text style={styles.infoStepTitle}>Add Your Details</Text>
+        <Text style={styles.infoStepDescription}>
+          Enter your name (optional) and party size so the host knows who you are.
+        </Text>
+      </View>
+
+      <View style={styles.infoSection}>
+        <View style={styles.infoStepNumber}>
+          <Text style={styles.infoStepNumberText}>3</Text>
+        </View>
+        <Text style={styles.infoStepTitle}>Wait for Your Turn</Text>
+        <Text style={styles.infoStepDescription}>
+          Track your position in real-time. You will be notified when it is your turn.
+        </Text>
+      </View>
+
+      <View style={styles.infoDivider} />
+
+      <View style={styles.infoTipCard}>
+        <Text style={styles.infoTipTitle}>Pro Tips</Text>
+        <View style={styles.infoFeatureRow}>
+          <Text style={styles.infoFeatureIcon}>🔔</Text>
+          <Text style={styles.infoFeatureText}>
+            Enable notifications to get alerted when it is your turn
+          </Text>
+        </View>
+        <View style={styles.infoFeatureRow}>
+          <Text style={styles.infoFeatureIcon}>📱</Text>
+          <Text style={styles.infoFeatureText}>Keep this page open to see live updates</Text>
+        </View>
+        <View style={styles.infoFeatureRow}>
+          <Text style={styles.infoFeatureIcon}>👥</Text>
+          <Text style={styles.infoFeatureText}>
+            Set your party size accurately for better wait estimates
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderModals = () => (
+    <>
       <Modal
         visible={scannerVisible}
         animationType="slide"
@@ -995,6 +1035,63 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           </View>
         </View>
       </Modal>
+    </>
+  );
+
+  // Desktop layout
+  if (isDesktop) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <ScrollView
+          contentContainerStyle={styles.desktopContainer}
+          style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled">
+          {/* Left column - Form */}
+          <View style={styles.desktopFormColumn}>
+            <Text style={styles.desktopTitle}>Join a Queue</Text>
+            <Text style={styles.desktopSubtitle}>
+              Enter the queue code to reserve your spot in line.
+            </Text>
+            <View style={styles.desktopCard}>{renderFormFields()}</View>
+
+            {resultText ? (
+              <View style={[styles.resultCard, { marginTop: 24 }]}>
+                <Text style={styles.resultText}>{resultText}</Text>
+                {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
+                {renderPushBell()}
+              </View>
+            ) : null}
+          </View>
+
+          {/* Right column - Info */}
+          <View style={styles.desktopInfoColumn}>{renderInfoPanel()}</View>
+        </ScrollView>
+        {renderModals()}
+      </SafeAreaProvider>
+    );
+  }
+
+  // Mobile layout
+  return (
+    <SafeAreaProvider style={styles.safe}>
+      <KeyboardAvoidingView
+        behavior={Platform.select({ ios: 'padding', android: undefined })}
+        style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <Text style={styles.title}>Join Queue</Text>
+
+          <View style={styles.card}>{renderFormFields()}</View>
+
+          {resultText ? (
+            <View style={styles.resultCard}>
+              <Text style={styles.resultText}>{resultText}</Text>
+              {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
+              {renderPushBell()}
+            </View>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
+      {renderModals()}
     </SafeAreaProvider>
   );
 }

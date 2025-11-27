@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   Switch,
+  useWindowDimensions,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import DateTimePicker, {
@@ -82,6 +83,8 @@ function serializeTime(date: Date): string {
 
 export default function MakeQueueScreen({ navigation }: Props) {
   const { user } = useAuth();
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 900;
   const [eventName, setEventName] = useState('');
   const [location, setLocation] = useState('');
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
@@ -543,6 +546,343 @@ export default function MakeQueueScreen({ navigation }: Props) {
     }
   };
 
+  const renderFormFields = () => (
+    <>
+      {/* Event Name */}
+      <Text style={styles.label}>Event Name</Text>
+      <TextInput
+        placeholder="Dinner rush, pop-up, etc."
+        value={eventName}
+        onChangeText={setEventName}
+        style={styles.input}
+        returnKeyType="next"
+      />
+
+      {/* Location */}
+      <Text style={styles.label}>Location</Text>
+      <TextInput
+        placeholder={
+          isMapboxEnabled ? 'Search for a venue or address' : 'Add a short location note'
+        }
+        value={location}
+        onChangeText={(text) => {
+          setLocation(text);
+          setLocationSearchError(null);
+        }}
+        style={styles.input}
+        returnKeyType="search"
+        onFocus={handleLocationFocus}
+        onBlur={handleLocationBlur}
+        autoCapitalize="words"
+      />
+      {isMapboxEnabled ? (
+        <>
+          <View style={styles.locationHelperRow}>
+            {isSearchingLocations ? (
+              <ActivityIndicator
+                size="small"
+                color="#1f6feb"
+                style={styles.locationSearchSpinner}
+              />
+            ) : null}
+            <Text style={styles.locationHelperText} numberOfLines={2}>
+              {resolvedLocationHelperText}
+            </Text>
+          </View>
+          {shouldShowLocationSuggestions ? (
+            <View style={styles.locationSuggestionList}>
+              {locationSuggestions.map((suggestion, index) => (
+                <Pressable
+                  key={suggestion.id}
+                  style={[
+                    styles.locationSuggestion,
+                    index === 0 ? styles.locationSuggestionFirst : undefined,
+                  ]}
+                  onPress={() => handleLocationSuggestionPress(suggestion)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use ${suggestion.fullText}`}>
+                  <Text style={styles.locationSuggestionPrimary}>{suggestion.primaryText}</Text>
+                  {suggestion.secondaryText ? (
+                    <Text style={styles.locationSuggestionSecondary}>
+                      {suggestion.secondaryText}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              ))}
+              {!isSearchingLocations &&
+              !locationSuggestions.length &&
+              hasMinimumLocationQuery &&
+              !locationSearchError ? (
+                <Text style={styles.locationSuggestionEmpty}>No nearby matches yet.</Text>
+              ) : null}
+            </View>
+          ) : null}
+          {showLocationPermissionHint ? (
+            <Text style={styles.locationPermissionHint}>
+              Enable location permissions in system settings to prioritize nearby matches.
+            </Text>
+          ) : null}
+        </>
+      ) : (
+        <Text style={styles.locationHelperText}>
+          Set `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN` to enable map-powered search.
+        </Text>
+      )}
+
+      {/* Max Queue Size */}
+      <Text style={styles.label}>Max Queue Size</Text>
+      <View style={styles.sliderRow}>
+        <Text style={styles.sliderHint}>Allow up to</Text>
+        <Text style={styles.sliderValue}>{maxSize}</Text>
+        <Text style={styles.sliderHint}>guests</Text>
+      </View>
+      <Slider
+        style={styles.slider}
+        minimumValue={MIN_QUEUE_SIZE}
+        maximumValue={MAX_QUEUE_SIZE}
+        step={1}
+        value={maxSize}
+        minimumTrackTintColor="#1f6feb"
+        maximumTrackTintColor="#d0d7de"
+        thumbTintColor="#1f6feb"
+        onValueChange={(value) => setMaxSize(Math.round(value))}
+      />
+
+      {/* Open Hours */}
+      <Text style={styles.label}>Open Hours</Text>
+      {Platform.OS === 'web' ? (
+        <View style={styles.timeRow}>
+          {renderWebTimeInput('open', 'Opens')}
+          {renderWebTimeInput('close', 'Closes')}
+        </View>
+      ) : (
+        <View style={styles.timeRow}>
+          <Pressable
+            style={[styles.timeInput, styles.timeInputLeft]}
+            onPress={() => handleTimePress('open')}
+            accessibilityRole="button">
+            <Text style={styles.timeLabel}>Opens</Text>
+            <Text style={styles.timeValue}>{formatTime(openTime)}</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.timeInput, styles.timeInputRight]}
+            onPress={() => handleTimePress('close')}
+            accessibilityRole="button">
+            <Text style={styles.timeLabel}>Closes</Text>
+            <Text style={styles.timeValue}>{formatTime(closeTime)}</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {Platform.OS === 'ios' && activePicker ? (
+        <View style={styles.timePickerContainer}>
+          <View style={styles.timePickerHeader}>
+            <Text style={styles.timePickerTitle}>
+              {activePicker === 'open' ? 'Opening time' : 'Closing time'}
+            </Text>
+            <Pressable onPress={handleDismissPicker} accessibilityRole="button">
+              <Text style={styles.timePickerDone}>Done</Text>
+            </Pressable>
+          </View>
+          <DateTimePicker
+            value={activePicker === 'open' ? openTime : closeTime}
+            mode="time"
+            display="spinner"
+            onChange={handleIosTimeChange}
+          />
+        </View>
+      ) : null}
+
+      {/* Contact Info */}
+      <Text style={styles.label}>Contact Info</Text>
+      <TextInput
+        placeholder="Enter your contact information"
+        value={contact}
+        onChangeText={setContact}
+        style={[styles.input, styles.textArea]}
+        multiline
+        numberOfLines={4}
+        textAlignVertical="top"
+      />
+
+      {/* Require Guest Login (only shown when host is logged in) */}
+      {user ? (
+        <View style={styles.switchRow}>
+          <View style={styles.switchLabelContainer}>
+            <Text style={styles.label}>Require Guest Login</Text>
+            <Text style={styles.switchDescription}>
+              Guests must sign in before joining this queue
+            </Text>
+          </View>
+          <Switch
+            value={requiresAuth}
+            onValueChange={setRequiresAuth}
+            trackColor={{ false: '#d0d7de', true: '#1f6feb' }}
+            thumbColor={requiresAuth ? '#fff' : '#f4f3f4'}
+          />
+        </View>
+      ) : null}
+
+      {/* Turnstile Widget */}
+      {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
+        <View style={{ marginVertical: 16, alignItems: 'center' }}>
+          <Turnstile
+            ref={turnstileRef}
+            siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
+            onSuccess={(token) => {
+              console.log('[QueueUp][Turnstile] Token received');
+              setTurnstileToken(token);
+            }}
+            onError={(error) => {
+              console.error('[QueueUp][Turnstile] Error:', error);
+              setTurnstileToken(null);
+            }}
+            onExpire={() => {
+              console.warn('[QueueUp][Turnstile] Token expired');
+              setTurnstileToken(null);
+            }}
+            onWidgetLoad={(widgetId) => {
+              console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
+            }}
+            options={{
+              theme: 'light',
+              size: 'normal',
+            }}
+          />
+        </View>
+      ) : null}
+
+      {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
+        <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
+          Complete the verification above to create queue
+        </Text>
+      ) : null}
+
+      {/* Submit */}
+      <Pressable
+        style={[
+          styles.button,
+          loading ||
+          (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
+            ? styles.buttonDisabled
+            : undefined,
+        ]}
+        onPress={onSubmit}
+        disabled={
+          loading ||
+          (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
+        }>
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Create Queue</Text>
+        )}
+      </Pressable>
+    </>
+  );
+
+  const renderPreviewPanel = () => {
+    const displayedDots = Math.min(maxSize, 5);
+    const remainingCount = maxSize - displayedDots;
+
+    return (
+      <View style={styles.previewCard}>
+        <Text style={styles.previewTitle}>Queue Preview</Text>
+
+        <View style={styles.previewSection}>
+          <Text style={styles.previewLabel}>Event Name</Text>
+          <Text style={eventName ? styles.previewValue : styles.previewValuePlaceholder}>
+            {eventName || 'Your event name'}
+          </Text>
+        </View>
+
+        <View style={styles.previewSection}>
+          <Text style={styles.previewLabel}>Location</Text>
+          <Text style={location ? styles.previewValue : styles.previewValuePlaceholder}>
+            {location || 'No location set'}
+          </Text>
+        </View>
+
+        <View style={styles.previewDivider} />
+
+        <View style={styles.previewSection}>
+          <Text style={styles.previewLabel}>Capacity</Text>
+          <View style={styles.previewQueueVisual}>
+            {Array.from({ length: displayedDots }).map((_, i) => (
+              <View
+                key={i}
+                style={[styles.previewQueueDot, i >= 3 ? styles.previewQueueDotEmpty : undefined]}>
+                <Text style={styles.previewQueueDotText}>{i + 1}</Text>
+              </View>
+            ))}
+            {remainingCount > 0 ? (
+              <Text style={styles.previewQueueMore}>+{remainingCount} more</Text>
+            ) : null}
+          </View>
+          <Text style={[styles.previewValue, { textAlign: 'center', marginTop: 8 }]}>
+            {maxSize} guests max
+          </Text>
+        </View>
+
+        <View style={styles.previewDivider} />
+
+        <View style={styles.previewTimeRow}>
+          <View style={styles.previewTimeItem}>
+            <Text style={styles.previewLabel}>Opens</Text>
+            <Text style={styles.previewValue}>{formatTime(openTime)}</Text>
+          </View>
+          <View style={styles.previewTimeItem}>
+            <Text style={styles.previewLabel}>Closes</Text>
+            <Text style={styles.previewValue}>{formatTime(closeTime)}</Text>
+          </View>
+        </View>
+
+        {contact ? (
+          <>
+            <View style={styles.previewDivider} />
+            <View style={styles.previewSection}>
+              <Text style={styles.previewLabel}>Contact</Text>
+              <Text style={styles.previewValue} numberOfLines={2}>
+                {contact}
+              </Text>
+            </View>
+          </>
+        ) : null}
+
+        {user && requiresAuth ? (
+          <View style={styles.previewBadge}>
+            <Text style={styles.previewBadgeText}>Login required to join</Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
+  // Desktop layout
+  if (isDesktop) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <ScrollView
+          contentContainerStyle={styles.desktopContainer}
+          style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled">
+          {/* Left column - Form */}
+          <View style={styles.desktopFormColumn}>
+            <Text style={styles.desktopTitle}>Create a Queue</Text>
+            <Text style={styles.desktopSubtitle}>
+              Set up your event and start managing guests in real-time.
+            </Text>
+            <View style={styles.desktopCard}>{renderFormFields()}</View>
+          </View>
+
+          {/* Right column - Preview */}
+          <View style={styles.desktopPreviewColumn}>{renderPreviewPanel()}</View>
+        </ScrollView>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Mobile layout
   return (
     <SafeAreaProvider style={styles.safe}>
       <KeyboardAvoidingView
@@ -554,241 +894,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
           keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Make Queue</Text>
 
-          <View style={styles.card}>
-            {/* Event Name */}
-            <Text style={styles.label}>Event Name</Text>
-            <TextInput
-              placeholder="Dinner rush, pop-up, etc."
-              value={eventName}
-              onChangeText={setEventName}
-              style={styles.input}
-              returnKeyType="next"
-            />
-
-            {/* Location */}
-            <Text style={styles.label}>Location</Text>
-            <TextInput
-              placeholder={
-                isMapboxEnabled ? 'Search for a venue or address' : 'Add a short location note'
-              }
-              value={location}
-              onChangeText={(text) => {
-                setLocation(text);
-                setLocationSearchError(null);
-              }}
-              style={styles.input}
-              returnKeyType="search"
-              onFocus={handleLocationFocus}
-              onBlur={handleLocationBlur}
-              autoCapitalize="words"
-            />
-            {isMapboxEnabled ? (
-              <>
-                <View style={styles.locationHelperRow}>
-                  {isSearchingLocations ? (
-                    <ActivityIndicator
-                      size="small"
-                      color="#1f6feb"
-                      style={styles.locationSearchSpinner}
-                    />
-                  ) : null}
-                  <Text style={styles.locationHelperText} numberOfLines={2}>
-                    {resolvedLocationHelperText}
-                  </Text>
-                </View>
-                {shouldShowLocationSuggestions ? (
-                  <View style={styles.locationSuggestionList}>
-                    {locationSuggestions.map((suggestion, index) => (
-                      <Pressable
-                        key={suggestion.id}
-                        style={[
-                          styles.locationSuggestion,
-                          index === 0 ? styles.locationSuggestionFirst : undefined,
-                        ]}
-                        onPress={() => handleLocationSuggestionPress(suggestion)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Use ${suggestion.fullText}`}>
-                        <Text style={styles.locationSuggestionPrimary}>
-                          {suggestion.primaryText}
-                        </Text>
-                        {suggestion.secondaryText ? (
-                          <Text style={styles.locationSuggestionSecondary}>
-                            {suggestion.secondaryText}
-                          </Text>
-                        ) : null}
-                      </Pressable>
-                    ))}
-                    {!isSearchingLocations &&
-                    !locationSuggestions.length &&
-                    hasMinimumLocationQuery &&
-                    !locationSearchError ? (
-                      <Text style={styles.locationSuggestionEmpty}>No nearby matches yet.</Text>
-                    ) : null}
-                  </View>
-                ) : null}
-                {showLocationPermissionHint ? (
-                  <Text style={styles.locationPermissionHint}>
-                    Enable location permissions in system settings to prioritize nearby matches.
-                  </Text>
-                ) : null}
-              </>
-            ) : (
-              <Text style={styles.locationHelperText}>
-                Set `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN` to enable map-powered search.
-              </Text>
-            )}
-
-            {/* Max Queue Size */}
-            <Text style={styles.label}>Max Queue Size</Text>
-            <View style={styles.sliderRow}>
-              <Text style={styles.sliderHint}>Allow up to</Text>
-              <Text style={styles.sliderValue}>{maxSize}</Text>
-              <Text style={styles.sliderHint}>guests</Text>
-            </View>
-            <Slider
-              style={styles.slider}
-              minimumValue={MIN_QUEUE_SIZE}
-              maximumValue={MAX_QUEUE_SIZE}
-              step={1}
-              value={maxSize}
-              minimumTrackTintColor="#1f6feb"
-              maximumTrackTintColor="#d0d7de"
-              thumbTintColor="#1f6feb"
-              onValueChange={(value) => setMaxSize(Math.round(value))}
-            />
-
-            {/* Open Hours */}
-            <Text style={styles.label}>Open Hours</Text>
-            {Platform.OS === 'web' ? (
-              <View style={styles.timeRow}>
-                {renderWebTimeInput('open', 'Opens')}
-                {renderWebTimeInput('close', 'Closes')}
-              </View>
-            ) : (
-              <View style={styles.timeRow}>
-                <Pressable
-                  style={[styles.timeInput, styles.timeInputLeft]}
-                  onPress={() => handleTimePress('open')}
-                  accessibilityRole="button">
-                  <Text style={styles.timeLabel}>Opens</Text>
-                  <Text style={styles.timeValue}>{formatTime(openTime)}</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.timeInput, styles.timeInputRight]}
-                  onPress={() => handleTimePress('close')}
-                  accessibilityRole="button">
-                  <Text style={styles.timeLabel}>Closes</Text>
-                  <Text style={styles.timeValue}>{formatTime(closeTime)}</Text>
-                </Pressable>
-              </View>
-            )}
-
-            {Platform.OS === 'ios' && activePicker ? (
-              <View style={styles.timePickerContainer}>
-                <View style={styles.timePickerHeader}>
-                  <Text style={styles.timePickerTitle}>
-                    {activePicker === 'open' ? 'Opening time' : 'Closing time'}
-                  </Text>
-                  <Pressable onPress={handleDismissPicker} accessibilityRole="button">
-                    <Text style={styles.timePickerDone}>Done</Text>
-                  </Pressable>
-                </View>
-                <DateTimePicker
-                  value={activePicker === 'open' ? openTime : closeTime}
-                  mode="time"
-                  display="spinner"
-                  onChange={handleIosTimeChange}
-                />
-              </View>
-            ) : null}
-
-            {/* Contact Info */}
-            <Text style={styles.label}>Contact Info</Text>
-            <TextInput
-              placeholder="Enter your contact information"
-              value={contact}
-              onChangeText={setContact}
-              style={[styles.input, styles.textArea]}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-
-            {/* Require Guest Login (only shown when host is logged in) */}
-            {user ? (
-              <View style={styles.switchRow}>
-                <View style={styles.switchLabelContainer}>
-                  <Text style={styles.label}>Require Guest Login</Text>
-                  <Text style={styles.switchDescription}>
-                    Guests must sign in before joining this queue
-                  </Text>
-                </View>
-                <Switch
-                  value={requiresAuth}
-                  onValueChange={setRequiresAuth}
-                  trackColor={{ false: '#d0d7de', true: '#1f6feb' }}
-                  thumbColor={requiresAuth ? '#fff' : '#f4f3f4'}
-                />
-              </View>
-            ) : null}
-
-            {/* Turnstile Widget */}
-            {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
-              <View style={{ marginVertical: 16, alignItems: 'center' }}>
-                <Turnstile
-                  ref={turnstileRef}
-                  siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
-                  onSuccess={(token) => {
-                    console.log('[QueueUp][Turnstile] Token received');
-                    setTurnstileToken(token);
-                  }}
-                  onError={(error) => {
-                    console.error('[QueueUp][Turnstile] Error:', error);
-                    setTurnstileToken(null);
-                  }}
-                  onExpire={() => {
-                    console.warn('[QueueUp][Turnstile] Token expired');
-                    setTurnstileToken(null);
-                  }}
-                  onWidgetLoad={(widgetId) => {
-                    console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
-                  }}
-                  options={{
-                    theme: 'light',
-                    size: 'normal',
-                  }}
-                />
-              </View>
-            ) : null}
-
-            {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
-              <Text
-                style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
-                Complete the verification above to create queue
-              </Text>
-            ) : null}
-
-            {/* Submit */}
-            <Pressable
-              style={[
-                styles.button,
-                loading ||
-                (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
-                  ? styles.buttonDisabled
-                  : undefined,
-              ]}
-              onPress={onSubmit}
-              disabled={
-                loading ||
-                (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
-              }>
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>Create Queue</Text>
-              )}
-            </Pressable>
-          </View>
+          <View style={styles.card}>{renderFormFields()}</View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaProvider>

@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Modal,
-    Platform,
-    Pressable,
-    ScrollView,
-    Text,
-    View,
-    TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  TouchableOpacity,
+  useWindowDimensions,
 } from 'react-native';
 import { ArrowLeft } from 'lucide-react-native';
 import { Bell, Check } from 'lucide-react-native';
@@ -37,71 +38,106 @@ const POLL_INTERVAL_MS = 10000;
 const ANALYTICS_SCREEN = 'guest_queue';
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
-    // Override the back button behavior to go to HomeScreen
-    useEffect(() => {
-        navigation.setOptions({
-            headerLeft: () => (
-                <Pressable
-                    onPress={() => navigation.navigate('HomeScreen')}
-                    accessibilityRole="button"
-                    accessibilityLabel="Go home"
-                    hitSlop={12}
-                    style={({ pressed }) => ({
-                        opacity: pressed ? 0.6 : 1,
-                        padding: 8,
-                        marginLeft: 8,
-                    })}>
-                    <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
-                </Pressable>
-            ),
-        });
-    }, [navigation]);
-    const { showModal } = useModal();
-    const {
-        code,
-        partyId,
-        sessionId: initialSessionId = null,
-        initialPosition,
-        initialAheadCount,
-        initialQueueLength,
-        initialEtaMs,
-        guestName,
-        partySize,
-    } = route.params;
+  // Override the back button behavior to go to HomeScreen
+  useEffect(() => {
+    navigation.setOptions({
+      headerLeft: () => (
+        <Pressable
+          onPress={() => navigation.navigate('HomeScreen')}
+          accessibilityRole="button"
+          accessibilityLabel="Go home"
+          hitSlop={12}
+          style={({ pressed }) => ({
+            opacity: pressed ? 0.6 : 1,
+            padding: 8,
+            marginLeft: 8,
+          })}>
+          <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+        </Pressable>
+      ),
+    });
+  }, [navigation]);
+  const { showModal } = useModal();
+  const {
+    code,
+    partyId: initialPartyId,
+    sessionId: initialSessionId = null,
+    initialPosition,
+    initialAheadCount,
+    initialQueueLength,
+    initialEtaMs,
+    guestName,
+    partySize,
+  } = route.params;
 
-    const derivedAhead = useMemo(() => {
-        if (typeof initialAheadCount === 'number') {
-        return Math.max(initialAheadCount, 0);
-        }
-        if (typeof initialPosition === 'number') {
-        return Math.max(initialPosition - 1, 0);
-        }
-        return null;
-    }, [initialAheadCount, initialPosition]);
+  // State for recovered partyId (when missing from route params on page refresh)
+  const [recoveredPartyId, setRecoveredPartyId] = useState<string | null>(null);
+  const [isRecoveringParams, setIsRecoveringParams] = useState(!initialPartyId);
 
-    const [position, setPosition] = useState<number | null>(
-        typeof initialPosition === 'number' ? initialPosition : null
-    );
-    const [aheadCount, setAheadCount] = useState<number | null>(derivedAhead);
-    const [queueLength, setQueueLength] = useState<number | null>(
-        typeof initialQueueLength === 'number' ? initialQueueLength : null
-    );
-    const [estimatedWaitMs, setEstimatedWaitMs] = useState<number | null>(
-        typeof initialEtaMs === 'number' ? initialEtaMs : null
-    );
-    const [statusText, setStatusText] = useState(
-        typeof initialPosition === 'number'
-        ? `You're number ${initialPosition} in line.`
-        : 'Connecting for live updates…'
-    );
-    const [connectionState, setConnectionState] = useState<'idle' | 'connecting' | 'open' | 'closed'>(
-        'idle'
-    );
-    const [pushReady, setPushReady] = useState(false);
-    const [pushMessage, setPushMessage] = useState<string | null>(null);
-    const [leaveLoading, setLeaveLoading] = useState(false);
-    const [leaveConfirmVisibleWeb, setLeaveConfirmVisibleWeb] = useState(false);
-    const [isActive, setIsActive] = useState(true);
+  // Effective partyId: use route param if available, otherwise use recovered value
+  const partyId = initialPartyId || recoveredPartyId;
+
+  // Recover partyId from storage when missing (e.g., page refresh)
+  useEffect(() => {
+    if (initialPartyId || !code) {
+      setIsRecoveringParams(false);
+      return;
+    }
+
+    const recoverPartyId = async () => {
+      try {
+        const joinedQueues = await storage.getJoinedQueues();
+        const joinedQueue = joinedQueues.find((q) => q.code === code);
+        if (joinedQueue?.partyId) {
+          setRecoveredPartyId(joinedQueue.partyId);
+          setIsRecoveringParams(false);
+        } else {
+          // No stored partyId found, redirect to join screen
+          console.warn('No partyId found in storage for queue:', code);
+          navigation.replace('JoinQueueScreen', { id: 'recover', code });
+        }
+      } catch (error) {
+        console.error('Failed to recover partyId from storage:', error);
+        navigation.replace('JoinQueueScreen', { id: 'recover', code });
+      }
+    };
+
+    void recoverPartyId();
+  }, [code, initialPartyId, navigation]);
+
+  const derivedAhead = useMemo(() => {
+    if (typeof initialAheadCount === 'number') {
+      return Math.max(initialAheadCount, 0);
+    }
+    if (typeof initialPosition === 'number') {
+      return Math.max(initialPosition - 1, 0);
+    }
+    return null;
+  }, [initialAheadCount, initialPosition]);
+
+  const [position, setPosition] = useState<number | null>(
+    typeof initialPosition === 'number' ? initialPosition : null
+  );
+  const [aheadCount, setAheadCount] = useState<number | null>(derivedAhead);
+  const [queueLength, setQueueLength] = useState<number | null>(
+    typeof initialQueueLength === 'number' ? initialQueueLength : null
+  );
+  const [estimatedWaitMs, setEstimatedWaitMs] = useState<number | null>(
+    typeof initialEtaMs === 'number' ? initialEtaMs : null
+  );
+  const [statusText, setStatusText] = useState(
+    typeof initialPosition === 'number'
+      ? `You're number ${initialPosition} in line.`
+      : 'Connecting for live updates…'
+  );
+  const [connectionState, setConnectionState] = useState<'idle' | 'connecting' | 'open' | 'closed'>(
+    'idle'
+  );
+  const [pushReady, setPushReady] = useState(false);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [leaveConfirmVisibleWeb, setLeaveConfirmVisibleWeb] = useState(false);
+  const [isActive, setIsActive] = useState(true);
   const [sessionId] = useState<string | null>(initialSessionId ?? null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [called, setCalled] = useState(false);
@@ -111,45 +147,47 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const [eventName, setEventName] = useState<string | null>(null);
   const [metricsExpanded, setMetricsExpanded] = useState(false);
   const isWeb = Platform.OS === 'web';
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 900;
 
-    // Load eventName from stored joined queue
-    useEffect(() => {
-        const loadEventName = async () => {
-            try {
-                const joinedQueues = await storage.getJoinedQueues();
-                const joinedQueue = joinedQueues.find(q => q.code === code);
-                if (joinedQueue?.eventName) {
-                    setEventName(joinedQueue.eventName);
-                }
-            } catch (error) {
-                console.warn('Failed to load event name from storage', error);
-            }
-        };
-        void loadEventName();
-    }, [code]);
-
-    const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-    const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const shouldReconnectRef = useRef(true);
-    const autoPushAttemptRef = useRef<string | null>(null);
-    const etag = useRef<string | null>(null);
-
-    const clearReconnect = useCallback(() => {
-        if (reconnectTimer.current) {
-        clearTimeout(reconnectTimer.current);
-        reconnectTimer.current = null;
+  // Load eventName from stored joined queue
+  useEffect(() => {
+    const loadEventName = async () => {
+      try {
+        const joinedQueues = await storage.getJoinedQueues();
+        const joinedQueue = joinedQueues.find((q) => q.code === code);
+        if (joinedQueue?.eventName) {
+          setEventName(joinedQueue.eventName);
         }
-    }, []);
+      } catch (error) {
+        console.warn('Failed to load event name from storage', error);
+      }
+    };
+    void loadEventName();
+  }, [code]);
 
-    const stopPolling = useCallback(() => {
-        if (pollInterval.current) {
-        clearInterval(pollInterval.current);
-        pollInterval.current = null;
-        }
-    }, []);
+  const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shouldReconnectRef = useRef(true);
+  const autoPushAttemptRef = useRef<string | null>(null);
+  const etag = useRef<string | null>(null);
 
-    const endSession = useCallback(
-        async (message: string) => {
+  const clearReconnect = useCallback(() => {
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollInterval.current) {
+      clearInterval(pollInterval.current);
+      pollInterval.current = null;
+    }
+  }, []);
+
+  const endSession = useCallback(
+    async (message: string) => {
       shouldReconnectRef.current = false;
       clearReconnect();
       stopPolling();
@@ -168,397 +206,402 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     [clearReconnect, stopPolling, code]
   );
 
-    const snapshotUrl = useMemo(() => {
-        if (!code || !partyId) return null;
-        const wsUrl = buildGuestConnectUrl(code, partyId);
-        return wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
-    }, [code, partyId]);
+  const snapshotUrl = useMemo(() => {
+    if (!code || !partyId) return null;
+    const wsUrl = buildGuestConnectUrl(code, partyId);
+    return wsUrl
+      .replace('/connect', '/snapshot')
+      .replace('wss://', 'https://')
+      .replace('ws://', 'http://');
+  }, [code, partyId]);
 
-    const handleSnapshot = useCallback((data: Record<string, unknown>) => {
-        try {
-            switch (data.type) {
-                case 'position': {
-                const newPosition = Number(data.position);
-                const newAhead = Number(data.aheadCount);
-                const newQueueLength =
-                    typeof data.queueLength === 'number' ? data.queueLength : null;
-                const newEtaMs =
-                    typeof data.estimatedWaitMs === 'number' ? data.estimatedWaitMs : null;
-                const snapshotEventName = typeof data.eventName === 'string' ? data.eventName : null;
+  const handleSnapshot = useCallback(
+    (data: Record<string, unknown>) => {
+      try {
+        switch (data.type) {
+          case 'position': {
+            const newPosition = Number(data.position);
+            const newAhead = Number(data.aheadCount);
+            const newQueueLength = typeof data.queueLength === 'number' ? data.queueLength : null;
+            const newEtaMs = typeof data.estimatedWaitMs === 'number' ? data.estimatedWaitMs : null;
+            const snapshotEventName = typeof data.eventName === 'string' ? data.eventName : null;
 
-                // Update eventName from snapshot if available and not already set
-                if (snapshotEventName && snapshotEventName !== eventName) {
-                    setEventName(snapshotEventName);
-                    // Also update storage
-                    storage.setJoinedQueue({
-                        code,
-                        sessionId: sessionId ?? '',
-                        partyId,
-                        eventName: snapshotEventName,
-                        joinedAt: Date.now(),
-                    }).catch(err => console.warn('Failed to update eventName in storage', err));
-                }
-
-                if (!Number.isNaN(newPosition)) {
-                    setPosition(newPosition);
-                    if (!Number.isNaN(newAhead)) {
-                    setStatusText(
-                        newAhead >= 0
-                        ? `You're number ${newPosition} in line. ${newAhead} ${
-                            newAhead === 1 ? 'party' : 'parties'
-                            } ahead.`
-                        : `You're number ${newPosition} in line.`
-                    );
-                    } else {
-                    setStatusText(`You're number ${newPosition} in line.`);
-                    }
-                }
-
-                if (!Number.isNaN(newAhead)) {
-                    setAheadCount(Math.max(newAhead, 0));
-                }
-
-                if (newQueueLength !== null) {
-                    setQueueLength(newQueueLength);
-                }
-
-              if (newEtaMs !== null) {
-                setEstimatedWaitMs(newEtaMs);
+            // Update eventName from snapshot if available and not already set
+            if (snapshotEventName && snapshotEventName !== eventName) {
+              setEventName(snapshotEventName);
+              // Also update storage (only if we have a valid partyId)
+              if (partyId) {
+                storage
+                  .setJoinedQueue({
+                    code,
+                    sessionId: sessionId ?? '',
+                    partyId,
+                    eventName: snapshotEventName,
+                    joinedAt: Date.now(),
+                  })
+                  .catch((err) => console.warn('Failed to update eventName in storage', err));
               }
-
-              setCalled(false);
-              setInfoMessage(null);
-              setCallDeadline(null);
-              break;
-            }
-            case 'called': {
-              setCalled(true);
-              setStatusText("You're being served now! Please head to the host.");
-              setInfoMessage('Head to the host stand within 2 minutes to keep your spot.');
-              setEstimatedWaitMs(0);
-              setPosition(1);
-              setAheadCount(0);
-              setQueueLength((prev) => (prev != null ? Math.max(prev, 1) : 1));
-              const deadlineValue =
-                typeof data.deadline === 'number' ? data.deadline : null;
-              setCallDeadline(deadlineValue);
-              break;
-            }
-            case 'removed': {
-              const reason = data.reason;
-              const reasonMessages: Record<string, string> = {
-                served: 'All set! You have been marked as served.',
-                no_show:
-                  "Time ran out before you could check in, so we had to release your spot.",
-                kicked: 'The host removed you from the queue.',
-                closed: 'Queue closed. Thanks for your patience!',
-                left: 'You have left the queue.',
-              };
-              const key = typeof reason === 'string' ? reason : '';
-              const message = reasonMessages[key] ?? 'You have left the queue.';
-              setInfoMessage(message);
-              setPosition(null);
-              setAheadCount(null);
-              setQueueLength(null);
-              setEstimatedWaitMs(null);
-              setCallDeadline(null);
-              setCalled(false);
-              endSession(message);
-              break;
-            }
-            case 'closed': {
-              const message = 'Queue closed by the host. Thanks for waiting with us!';
-              setInfoMessage(message);
-              setPosition(null);
-              setAheadCount(null);
-              setQueueLength(null);
-              setEstimatedWaitMs(null);
-              setCallDeadline(null);
-              endSession(message);
-              break;
-            }
-                default:
-                break;
-            }
-        } catch (error) {
-            console.warn('Failed to parse guest snapshot payload', error);
-        }
-    }, [code, sessionId, partyId, eventName, endSession]);
-
-    const poll = useCallback(async () => {
-        if (!snapshotUrl) {
-            return;
-        }
-
-        try {
-            const headers: HeadersInit = {};
-            if (etag.current) {
-                headers['If-None-Match'] = etag.current;
             }
 
-            const response = await fetch(snapshotUrl, { headers });
-
-            if (response.status === 304) {
-                // No changes, connection is healthy
-                setConnectionState('open');
-                return;
-            }
-
-            if (response.ok) {
-                const newEtag = response.headers.get('ETag');
-                if (newEtag) {
-                    etag.current = newEtag;
-                }
-                const data = await response.json();
-                handleSnapshot(data);
-                setConnectionState('open');
-            } else {
-                console.warn('[GuestQueueScreen] Poll failed:', response.status);
-                setConnectionState('closed');
-            }
-        } catch (error) {
-            console.error('[GuestQueueScreen] Poll error:', error);
-            setConnectionState('closed');
-        }
-    }, [snapshotUrl, handleSnapshot]);
-
-    const startPolling = useCallback(() => {
-        if (!snapshotUrl) {
-            return;
-        }
-
-        clearReconnect();
-        stopPolling();
-        setConnectionState('connecting');
-
-        // Poll immediately
-        poll();
-
-        // Then poll every POLL_INTERVAL_MS
-        pollInterval.current = setInterval(() => {
-            poll();
-        }, POLL_INTERVAL_MS);
-    }, [snapshotUrl, clearReconnect, stopPolling, poll]);
-
-    useEffect(() => {
-        if (!partyId || !code || !isActive) {
-        return undefined;
-        }
-
-        shouldReconnectRef.current = true;
-        startPolling();
-
-        return () => {
-        shouldReconnectRef.current = false;
-        clearReconnect();
-        stopPolling();
-        };
-    }, [code, partyId, isActive, clearReconnect, stopPolling, startPolling]);
-
-    useEffect(() => {
-        return () => {
-        clearReconnect();
-        stopPolling();
-        };
-    }, [clearReconnect, stopPolling]);
-
-    const disablePush = useCallback(async () => {
-        if (Platform.OS !== 'web') {
-            return;
-        }
-        if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-            return;
-        }
-        try {
-            const registration = await navigator.serviceWorker.ready;
-            const subscription = await registration.pushManager.getSubscription();
-            if (subscription) {
-                await subscription.unsubscribe();
-                setPushReady(false);
-                setPushMessage(null);
-                void trackEvent('push_denied', {
-                    sessionId,
-                    partyId,
-                    props: {
-                        screen: ANALYTICS_SCREEN,
-                        reason: 'user_disabled',
-                    },
-                });
-                showModal({
-                    title: 'Notifications Disabled',
-                    message: 'You will no longer receive browser notifications.',
-                });
-            } else {
-                setPushReady(false);
-                setPushMessage(null);
-                void trackEvent('push_denied', {
-                    sessionId,
-                    partyId,
-                    props: {
-                        screen: ANALYTICS_SCREEN,
-                        reason: 'already_disabled',
-                    },
-                });
-                showModal({
-                    title: 'Notifications Disabled',
-                    message: 'Notifications were already disabled.',
-                });
-            }
-        } catch (e) {
-            console.warn('disablePush failed', e);
-            void trackEvent('push_denied', {
-                sessionId,
-                partyId,
-                props: {
-                    screen: ANALYTICS_SCREEN,
-                    reason: 'disable_failed',
-                },
-            });
-            showModal({
-                title: 'Failed to disable notifications',
-                message: 'Please try again in a moment.',
-            });
-        }
-    }, [showModal, sessionId, partyId]);
-
-    const enablePush = useCallback(
-        async (options?: { silent?: boolean }) => {
-        if (Platform.OS !== 'web') {
-            return;
-        }
-        if (!sessionId || !partyId) {
-            return;
-        }
-        if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-            return;
-        }
-        const hasServiceWorker = 'serviceWorker' in navigator;
-        const hasPushManager = 'PushManager' in window;
-        const hasNotificationApi = typeof Notification !== 'undefined';
-        if (!hasServiceWorker || !hasPushManager || !hasNotificationApi) {
-            setPushMessage('Notifications not supported in this browser.');
-            void trackEvent('push_denied', {
-              sessionId,
-              partyId,
-              props: {
-                screen: ANALYTICS_SCREEN,
-                auto: Boolean(options?.silent),
-                reason: 'unsupported_capability',
-              },
-            });
-            if (!options?.silent) {
-                showModal({
-                    title: 'Push not supported',
-                    message: 'This browser does not support notifications.',
-                });
-            }
-            return;
-        }
-        const logPushMetric = (
-          event: 'push_prompt_shown' | 'push_granted' | 'push_denied',
-          props?: Record<string, unknown>
-        ) => {
-          void trackEvent(event, {
-            sessionId,
-            partyId,
-            props: {
-              screen: ANALYTICS_SCREEN,
-              auto: Boolean(options?.silent),
-              ...(props ?? {}),
-            },
-          });
-        };
-        try {
-            setPushMessage('Enabling notifications…');
-            logPushMetric('push_prompt_shown');
-            const publicKey = await getVapidPublicKey();
-            if (!publicKey) {
-            throw new Error('Missing VAPID key');
-            }
-            const b64ToU8 = (b64: string) => {
-            try {
-                return Uint8Array.from(
-                atob(b64.replace(/-/g, '+').replace(/_/g, '/')),
-                (c) => c.charCodeAt(0)
+            if (!Number.isNaN(newPosition)) {
+              setPosition(newPosition);
+              if (!Number.isNaN(newAhead)) {
+                setStatusText(
+                  newAhead >= 0
+                    ? `You're number ${newPosition} in line. ${newAhead} ${
+                        newAhead === 1 ? 'party' : 'parties'
+                      } ahead.`
+                    : `You're number ${newPosition} in line.`
                 );
-            } catch (error) {
-                throw new Error('Invalid VAPID public key format');
+              } else {
+                setStatusText(`You're number ${newPosition} in line.`);
+              }
             }
+
+            if (!Number.isNaN(newAhead)) {
+              setAheadCount(Math.max(newAhead, 0));
+            }
+
+            if (newQueueLength !== null) {
+              setQueueLength(newQueueLength);
+            }
+
+            if (newEtaMs !== null) {
+              setEstimatedWaitMs(newEtaMs);
+            }
+
+            setCalled(false);
+            setInfoMessage(null);
+            setCallDeadline(null);
+            break;
+          }
+          case 'called': {
+            setCalled(true);
+            setStatusText("You're being served now! Please head to the host.");
+            setInfoMessage('Head to the host stand within 2 minutes to keep your spot.');
+            setEstimatedWaitMs(0);
+            setPosition(1);
+            setAheadCount(0);
+            setQueueLength((prev) => (prev != null ? Math.max(prev, 1) : 1));
+            const deadlineValue = typeof data.deadline === 'number' ? data.deadline : null;
+            setCallDeadline(deadlineValue);
+            break;
+          }
+          case 'removed': {
+            const reason = data.reason;
+            const reasonMessages: Record<string, string> = {
+              served: 'All set! You have been marked as served.',
+              no_show: 'Time ran out before you could check in, so we had to release your spot.',
+              kicked: 'The host removed you from the queue.',
+              closed: 'Queue closed. Thanks for your patience!',
+              left: 'You have left the queue.',
             };
-            const isGhPages = window.location.pathname.startsWith('/queueup');
-            const swPath = isGhPages ? '/sw.js' : '/sw.js';
-            const swScope = isGhPages ? '/' : '/';
-            const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
-            let subscription = await registration.pushManager.getSubscription();
-            let subscriptionState: 'existing' | 'new' = subscription ? 'existing' : 'new';
-            const requestPermission = async () => {
-            if (Notification.permission === 'granted') {
-                return 'granted' as NotificationPermission;
-            }
-            if (Notification.permission === 'denied') {
-                return 'denied' as NotificationPermission;
-            }
-            return Notification.requestPermission();
-            };
-            if (!subscription) {
-            const perm = await requestPermission();
-            if (perm !== 'granted') {
-                setPushMessage('Notifications are blocked in your browser settings.');
-                logPushMetric('push_denied', { reason: perm });
-                if (!options?.silent) {
-                    showModal({
-                        title: 'Notifications blocked',
-                        message: 'Enable notifications in your browser settings to get alerts.',
-                    });
-                }
-                return;
-            }
-            subscription = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: b64ToU8(publicKey),
-            });
-            subscriptionState = 'new';
-            }
-            const subscriptionJson = subscription.toJSON?.();
-            if (!subscriptionJson || !subscriptionJson.endpoint) {
-                throw new Error('Invalid subscription: missing endpoint');
-            }
-            await savePushSubscription({
-            sessionId,
-            partyId,
-            subscription: subscriptionJson as PushSubscriptionParams,
-            });
-            console.log('[QueueUp][push] saved subscription', {
-            endpoint: subscription.endpoint,
-            apiBase: API_BASE_URL,
-            sessionId,
-            partyId,
-            });
-            logPushMetric('push_granted', { subscriptionState });
-            setPushReady(true);
-            setPushMessage('Notifications on');
-            if (!options?.silent) {
-                showModal({
-                    title: 'Notifications enabled',
-                    message: 'We will alert you when it is your turn.',
-                });
-            }
-        } catch (e) {
-            console.warn('enablePush failed', e);
-            logPushMetric('push_denied', {
-              reason: e instanceof Error ? e.message : 'unknown_error',
-            });
-            setPushMessage('Unable to enable notifications right now.');
-            if (!options?.silent) {
-                showModal({
-                    title: 'Failed to enable push',
-                    message: 'Please try again in a moment.',
-                });
-            }
+            const key = typeof reason === 'string' ? reason : '';
+            const message = reasonMessages[key] ?? 'You have left the queue.';
+            setInfoMessage(message);
+            setPosition(null);
+            setAheadCount(null);
+            setQueueLength(null);
+            setEstimatedWaitMs(null);
+            setCallDeadline(null);
+            setCalled(false);
+            endSession(message);
+            break;
+          }
+          case 'closed': {
+            const message = 'Queue closed by the host. Thanks for waiting with us!';
+            setInfoMessage(message);
+            setPosition(null);
+            setAheadCount(null);
+            setQueueLength(null);
+            setEstimatedWaitMs(null);
+            setCallDeadline(null);
+            endSession(message);
+            break;
+          }
+          default:
+            break;
         }
+      } catch (error) {
+        console.warn('Failed to parse guest snapshot payload', error);
+      }
+    },
+    [code, sessionId, partyId, eventName, endSession]
+  );
+
+  const poll = useCallback(async () => {
+    if (!snapshotUrl) {
+      return;
+    }
+
+    try {
+      const headers: HeadersInit = {};
+      if (etag.current) {
+        headers['If-None-Match'] = etag.current;
+      }
+
+      const response = await fetch(snapshotUrl, { headers });
+
+      if (response.status === 304) {
+        // No changes, connection is healthy
+        setConnectionState('open');
+        return;
+      }
+
+      if (response.ok) {
+        const newEtag = response.headers.get('ETag');
+        if (newEtag) {
+          etag.current = newEtag;
+        }
+        const data = await response.json();
+        handleSnapshot(data);
+        setConnectionState('open');
+      } else {
+        console.warn('[GuestQueueScreen] Poll failed:', response.status);
+        setConnectionState('closed');
+      }
+    } catch (error) {
+      console.error('[GuestQueueScreen] Poll error:', error);
+      setConnectionState('closed');
+    }
+  }, [snapshotUrl, handleSnapshot]);
+
+  const startPolling = useCallback(() => {
+    if (!snapshotUrl) {
+      return;
+    }
+
+    clearReconnect();
+    stopPolling();
+    setConnectionState('connecting');
+
+    // Poll immediately
+    poll();
+
+    // Then poll every POLL_INTERVAL_MS
+    pollInterval.current = setInterval(() => {
+      poll();
+    }, POLL_INTERVAL_MS);
+  }, [snapshotUrl, clearReconnect, stopPolling, poll]);
+
+  useEffect(() => {
+    if (!partyId || !code || !isActive) {
+      return undefined;
+    }
+
+    shouldReconnectRef.current = true;
+    startPolling();
+
+    return () => {
+      shouldReconnectRef.current = false;
+      clearReconnect();
+      stopPolling();
+    };
+  }, [code, partyId, isActive, clearReconnect, stopPolling, startPolling]);
+
+  useEffect(() => {
+    return () => {
+      clearReconnect();
+      stopPolling();
+    };
+  }, [clearReconnect, stopPolling]);
+
+  const disablePush = useCallback(async () => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+      return;
+    }
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        await subscription.unsubscribe();
+        setPushReady(false);
+        setPushMessage(null);
+        void trackEvent('push_denied', {
+          sessionId,
+          partyId,
+          props: {
+            screen: ANALYTICS_SCREEN,
+            reason: 'user_disabled',
+          },
+        });
+        showModal({
+          title: 'Notifications Disabled',
+          message: 'You will no longer receive browser notifications.',
+        });
+      } else {
+        setPushReady(false);
+        setPushMessage(null);
+        void trackEvent('push_denied', {
+          sessionId,
+          partyId,
+          props: {
+            screen: ANALYTICS_SCREEN,
+            reason: 'already_disabled',
+          },
+        });
+        showModal({
+          title: 'Notifications Disabled',
+          message: 'Notifications were already disabled.',
+        });
+      }
+    } catch (e) {
+      console.warn('disablePush failed', e);
+      void trackEvent('push_denied', {
+        sessionId,
+        partyId,
+        props: {
+          screen: ANALYTICS_SCREEN,
+          reason: 'disable_failed',
         },
-        [partyId, sessionId, showModal]
-    );
+      });
+      showModal({
+        title: 'Failed to disable notifications',
+        message: 'Please try again in a moment.',
+      });
+    }
+  }, [showModal, sessionId, partyId]);
+
+  const enablePush = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (Platform.OS !== 'web') {
+        return;
+      }
+      if (!sessionId || !partyId) {
+        return;
+      }
+      if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+        return;
+      }
+      const hasServiceWorker = 'serviceWorker' in navigator;
+      const hasPushManager = 'PushManager' in window;
+      const hasNotificationApi = typeof Notification !== 'undefined';
+      if (!hasServiceWorker || !hasPushManager || !hasNotificationApi) {
+        setPushMessage('Notifications not supported in this browser.');
+        void trackEvent('push_denied', {
+          sessionId,
+          partyId,
+          props: {
+            screen: ANALYTICS_SCREEN,
+            auto: Boolean(options?.silent),
+            reason: 'unsupported_capability',
+          },
+        });
+        if (!options?.silent) {
+          showModal({
+            title: 'Push not supported',
+            message: 'This browser does not support notifications.',
+          });
+        }
+        return;
+      }
+      const logPushMetric = (
+        event: 'push_prompt_shown' | 'push_granted' | 'push_denied',
+        props?: Record<string, unknown>
+      ) => {
+        void trackEvent(event, {
+          sessionId,
+          partyId,
+          props: {
+            screen: ANALYTICS_SCREEN,
+            auto: Boolean(options?.silent),
+            ...(props ?? {}),
+          },
+        });
+      };
+      try {
+        setPushMessage('Enabling notifications…');
+        logPushMetric('push_prompt_shown');
+        const publicKey = await getVapidPublicKey();
+        if (!publicKey) {
+          throw new Error('Missing VAPID key');
+        }
+        const b64ToU8 = (b64: string) => {
+          try {
+            return Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
+              c.charCodeAt(0)
+            );
+          } catch (error) {
+            throw new Error('Invalid VAPID public key format');
+          }
+        };
+        const isGhPages = window.location.pathname.startsWith('/queueup');
+        const swPath = isGhPages ? '/sw.js' : '/sw.js';
+        const swScope = isGhPages ? '/' : '/';
+        const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
+        let subscription = await registration.pushManager.getSubscription();
+        let subscriptionState: 'existing' | 'new' = subscription ? 'existing' : 'new';
+        const requestPermission = async () => {
+          if (Notification.permission === 'granted') {
+            return 'granted' as NotificationPermission;
+          }
+          if (Notification.permission === 'denied') {
+            return 'denied' as NotificationPermission;
+          }
+          return Notification.requestPermission();
+        };
+        if (!subscription) {
+          const perm = await requestPermission();
+          if (perm !== 'granted') {
+            setPushMessage('Notifications are blocked in your browser settings.');
+            logPushMetric('push_denied', { reason: perm });
+            if (!options?.silent) {
+              showModal({
+                title: 'Notifications blocked',
+                message: 'Enable notifications in your browser settings to get alerts.',
+              });
+            }
+            return;
+          }
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: b64ToU8(publicKey),
+          });
+          subscriptionState = 'new';
+        }
+        const subscriptionJson = subscription.toJSON?.();
+        if (!subscriptionJson || !subscriptionJson.endpoint) {
+          throw new Error('Invalid subscription: missing endpoint');
+        }
+        await savePushSubscription({
+          sessionId,
+          partyId,
+          subscription: subscriptionJson as PushSubscriptionParams,
+        });
+        console.log('[QueueUp][push] saved subscription', {
+          endpoint: subscription.endpoint,
+          apiBase: API_BASE_URL,
+          sessionId,
+          partyId,
+        });
+        logPushMetric('push_granted', { subscriptionState });
+        setPushReady(true);
+        setPushMessage('Notifications on');
+        if (!options?.silent) {
+          showModal({
+            title: 'Notifications enabled',
+            message: 'We will alert you when it is your turn.',
+          });
+        }
+      } catch (e) {
+        console.warn('enablePush failed', e);
+        logPushMetric('push_denied', {
+          reason: e instanceof Error ? e.message : 'unknown_error',
+        });
+        setPushMessage('Unable to enable notifications right now.');
+        if (!options?.silent) {
+          showModal({
+            title: 'Failed to enable push',
+            message: 'Please try again in a moment.',
+          });
+        }
+      }
+    },
+    [partyId, sessionId, showModal]
+  );
 
   useEffect(() => {
     if (!isWeb || !sessionId || !partyId || pushReady) {
@@ -599,21 +642,22 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     };
   }, [code, partyId]);
 
-    const connectionLabel = useMemo(() => {
-        switch (connectionState) {
-        case 'open':
-            return 'Live updates on';
-        case 'connecting':
-            return 'Connecting for live updates…';
-        case 'closed':
-            return 'Connection lost. Waiting to retry…';
-        default:
-            return 'Waiting to connect…';
-        }
-    }, [connectionState]);
+  const connectionLabel = useMemo(() => {
+    switch (connectionState) {
+      case 'open':
+        return 'Live updates on';
+      case 'connecting':
+        return 'Connecting for live updates…';
+      case 'closed':
+        return 'Connection lost. Waiting to retry…';
+      default:
+        return 'Waiting to connect…';
+    }
+  }, [connectionState]);
 
-    const aheadDisplay = aheadCount ?? (typeof position === 'number' ? Math.max(position - 1, 0) : null);
-    const queueLengthDisplay = queueLength ?? (typeof position === 'number' ? position : null);
+  const aheadDisplay =
+    aheadCount ?? (typeof position === 'number' ? Math.max(position - 1, 0) : null);
+  const queueLengthDisplay = queueLength ?? (typeof position === 'number' ? position : null);
   const etaText = useMemo(() => {
     if (estimatedWaitMs == null) {
       return '—';
@@ -652,269 +696,401 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     [code, partyId, sessionId, trustSurveySubmitting]
   );
 
-    const performLeave = useCallback(async () => {
-        if (!code || !partyId) {
-        return;
-        }
-        setLeaveLoading(true);
-        try {
-        if (estimatedWaitMs != null) {
-          void trackEvent('abandon_after_eta', {
-            sessionId,
-            partyId,
-            queueCode: code,
-            props: {
-              estimatedWaitMs,
-              position,
-              aheadCount,
-              queueLength,
-              called,
-            },
-          });
-        }
-        await leaveQueue({ code, partyId });
-        try {
-          await storage.removeJoinedQueue(code);
-        } catch (storageError) {
-          console.warn('Failed to remove joined queue from storage', storageError);
-        }
-        Alert.alert('Left queue', 'You have left the queue.');
-        navigation.replace('HomeScreen');
-        } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to leave queue';
-        Alert.alert('Unable to leave queue', message);
-        } finally {
-        setLeaveConfirmVisibleWeb(false);
-        setLeaveLoading(false);
-        }
-    }, [code, partyId, navigation, estimatedWaitMs, sessionId, position, aheadCount, queueLength, called]);
+  const performLeave = useCallback(async () => {
+    if (!code || !partyId) {
+      return;
+    }
+    setLeaveLoading(true);
+    try {
+      if (estimatedWaitMs != null) {
+        void trackEvent('abandon_after_eta', {
+          sessionId,
+          partyId,
+          queueCode: code,
+          props: {
+            estimatedWaitMs,
+            position,
+            aheadCount,
+            queueLength,
+            called,
+          },
+        });
+      }
+      await leaveQueue({ code, partyId });
+      try {
+        await storage.removeJoinedQueue(code);
+      } catch (storageError) {
+        console.warn('Failed to remove joined queue from storage', storageError);
+      }
+      Alert.alert('Left queue', 'You have left the queue.');
+      navigation.replace('HomeScreen');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to leave queue';
+      Alert.alert('Unable to leave queue', message);
+    } finally {
+      setLeaveConfirmVisibleWeb(false);
+      setLeaveLoading(false);
+    }
+  }, [
+    code,
+    partyId,
+    navigation,
+    estimatedWaitMs,
+    sessionId,
+    position,
+    aheadCount,
+    queueLength,
+    called,
+  ]);
 
-    const cancelLeaveWeb = useCallback(() => {
-        if (leaveLoading) {
-        return;
-        }
-        setLeaveConfirmVisibleWeb(false);
-    }, [leaveLoading]);
+  const cancelLeaveWeb = useCallback(() => {
+    if (leaveLoading) {
+      return;
+    }
+    setLeaveConfirmVisibleWeb(false);
+  }, [leaveLoading]);
 
-    const confirmLeave = useCallback(() => {
-        if (!code || !partyId || leaveLoading) {
-        return;
-        }
-        if (isWeb) {
-        setLeaveConfirmVisibleWeb(true);
-        return;
-        }
-        Alert.alert('Leave queue?', 'You will lose your place in line.', [
-        { text: 'Stay', style: 'cancel' },
-        { text: 'Leave Queue', style: 'destructive', onPress: () => void performLeave() },
-        ]);
-    }, [code, partyId, leaveLoading, performLeave, isWeb]);
+  const confirmLeave = useCallback(() => {
+    if (!code || !partyId || leaveLoading) {
+      return;
+    }
+    if (isWeb) {
+      setLeaveConfirmVisibleWeb(true);
+      return;
+    }
+    Alert.alert('Leave queue?', 'You will lose your place in line.', [
+      { text: 'Stay', style: 'cancel' },
+      { text: 'Leave Queue', style: 'destructive', onPress: () => void performLeave() },
+    ]);
+  }, [code, partyId, leaveLoading, performLeave, isWeb]);
 
-    const webLeaveModal = isWeb ? (
-        <Modal
-        visible={leaveConfirmVisibleWeb}
-        transparent
-        animationType="fade"
-        onRequestClose={cancelLeaveWeb}>
-        <View style={styles.webModalBackdrop}>
-            <View style={styles.webModalCard}>
-            <Text style={styles.webModalTitle}>Leave queue?</Text>
-            <Text style={styles.webModalMessage}>
-                You will lose your place in line. Are you sure you want to leave?
-            </Text>
-            <View style={styles.webModalActions}>
-                <Pressable style={styles.webModalCancelButton} onPress={cancelLeaveWeb}>
-                <Text style={styles.webModalCancelText}>Stay</Text>
-                </Pressable>
-                <Pressable
-                style={[
-                    styles.webModalConfirmButton,
-                    leaveLoading ? styles.webModalConfirmButtonDisabled : undefined,
-                ]}
-                onPress={() => void performLeave()}
-                disabled={leaveLoading}>
-                {leaveLoading ? (
-                    <ActivityIndicator color="#fff" />
-                ) : (
-                    <Text style={styles.webModalConfirmText}>Leave Queue</Text>
-                )}
-                </Pressable>
-            </View>
-            </View>
+  const webLeaveModal = isWeb ? (
+    <Modal
+      visible={leaveConfirmVisibleWeb}
+      transparent
+      animationType="fade"
+      onRequestClose={cancelLeaveWeb}>
+      <View style={styles.webModalBackdrop}>
+        <View style={styles.webModalCard}>
+          <Text style={styles.webModalTitle}>Leave queue?</Text>
+          <Text style={styles.webModalMessage}>
+            You will lose your place in line. Are you sure you want to leave?
+          </Text>
+          <View style={styles.webModalActions}>
+            <Pressable style={styles.webModalCancelButton} onPress={cancelLeaveWeb}>
+              <Text style={styles.webModalCancelText}>Stay</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.webModalConfirmButton,
+                leaveLoading ? styles.webModalConfirmButtonDisabled : undefined,
+              ]}
+              onPress={() => void performLeave()}
+              disabled={leaveLoading}>
+              {leaveLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.webModalConfirmText}>Leave Queue</Text>
+              )}
+            </Pressable>
+          </View>
         </View>
-        </Modal>
-    ) : null;
+      </View>
+    </Modal>
+  ) : null;
 
+  // Render shared queue badge component
+  const renderQueueBadge = () => (
+    <View style={styles.codeBadge}>
+      <View style={styles.codeBadgeTextGroup}>
+        <Text style={styles.codeBadgeLabel}>Queue</Text>
+        <Text style={styles.codeBadgeValue}>{eventName || code}</Text>
+      </View>
+      <View
+        style={[
+          styles.codeBadgeStatus,
+          isActive ? styles.codeBadgeStatusActive : styles.codeBadgeStatusComplete,
+        ]}>
+        <Text
+          style={[
+            styles.codeBadgeStatusText,
+            isActive ? styles.codeBadgeStatusTextActive : styles.codeBadgeStatusTextComplete,
+          ]}>
+          {isActive ? 'Active' : 'Finished'}
+        </Text>
+      </View>
+    </View>
+  );
+
+  // Render notification button (web only)
+  const renderNotificationButton = () => {
+    if (!isWeb) return null;
     return (
-        <SafeAreaProvider style={styles.safe}>
-        <ScrollView contentContainerStyle={styles.scroll}>
-            <Text style={styles.title}>Your Spot</Text>
-
-            <View style={styles.card}>
-            <View style={styles.codeBadge}>
-              <View style={styles.codeBadgeTextGroup}>
-                <Text style={styles.codeBadgeLabel}>Queue</Text>
-                <Text style={styles.codeBadgeValue}>{eventName || code}</Text>
-              </View>
-              <View
-                style={[
-                  styles.codeBadgeStatus,
-                  isActive ? styles.codeBadgeStatusActive : styles.codeBadgeStatusComplete,
-                ]}>
-                <Text
-                  style={[
-                    styles.codeBadgeStatusText,
-                    isActive
-                      ? styles.codeBadgeStatusTextActive
-                      : styles.codeBadgeStatusTextComplete,
-                  ]}>
-                  {isActive ? 'Active' : 'Finished'}
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.statusText}>{statusText}</Text>
-            {infoMessage ? <Text style={styles.infoText}>{infoMessage}</Text> : null}
-            {isActive ? (
-              <>
-                <Text style={styles.connectionText}>{connectionLabel}</Text>
-                {called ? <Text style={styles.calledText}>It’s your turn!</Text> : null}
-                {called ? (
-                  <View style={styles.timerRow}>
-                    <Timer targetTimestamp={callDeadline} label="Time left" compact />
-                  </View>
-                ) : null}
-                {isWeb ? (
-                  <Pressable
-                    style={[styles.pushButton, pushReady && styles.pushButtonActive]}
-                    onPress={async () => {
-                      if (pushReady) {
-                        await disablePush();
-                      } else if (sessionId && partyId) {
-                        await enablePush();
-                      } else {
-                        showModal({
-                          title: 'Unable to Enable Notifications',
-                          message: 'Please wait for the connection to be established.',
-                        });
-                      }
-                    }}>
-                    <Bell
-                       size={16}
-                       color={pushReady ? '#fff' : '#1f6feb'}
-                     />
-                    {pushReady ? <Check size={14} color="#fff" /> : null}
-                    <Text
-                      style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>
-                      {pushReady ? 'Notifications on' : 'Enable notifications'}
-                    </Text>
-                  </Pressable>
-                ) : null}
-
-                <View style={styles.metricsDivider} />
-
-                <Pressable
-                  style={styles.metricsHeader}
-                  onPress={() => setMetricsExpanded((prev) => !prev)}>
-                  <Text style={styles.sectionTitle}>Queue details</Text>
-                  {metricsExpanded ? (
-                    <ChevronUp size={18} color="#586069" />
-                  ) : (
-                    <ChevronDown size={18} color="#586069" />
-                  )}
-                </Pressable>
-
-                {metricsExpanded ? (
-                  <View>
-                    <View style={styles.metricsGrid}>
-                      <View style={styles.metricItem}>
-                        <Text style={styles.metricLabel}>Your Position</Text>
-                        <Text style={styles.metricValue}>
-                          {typeof position === 'number' ? `#${position}` : '—'}
-                        </Text>
-                      </View>
-                      <View style={styles.metricItem}>
-                        <Text style={styles.metricLabel}>Ahead of You</Text>
-                        <Text style={styles.metricValue}>
-                          {aheadDisplay != null ? `${aheadDisplay}` : '—'}
-                        </Text>
-                      </View>
-                      <View style={styles.metricItem}>
-                        <Text style={styles.metricLabel}>Queue Size</Text>
-                        <Text style={styles.metricValue}>
-                          {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
-                        </Text>
-                      </View>
-                      <View style={styles.metricItem}>
-                        <Text style={styles.metricLabel}>Est. Wait</Text>
-                        <Text style={styles.metricValue}>{etaText}</Text>
-                      </View>
-                    </View>
-
-                    {trustSurveyStatus === 'submitted' ? (
-                      <Text style={styles.trustSurveyThanks}>
-                        Thanks for the feedback!
-                      </Text>
-                    ) : (
-                      <>
-                        <Text style={styles.trustSurveyPrompt}>
-                          Does this queue info seem accurate?
-                        </Text>
-                        <View style={styles.trustSurveyButtons}>
-                          <Pressable
-                            style={styles.trustSurveyButtonPrimary}
-                            onPress={() => handleTrustSurveySubmit('yes')}
-                            disabled={trustSurveySubmitting}>
-                            <Text style={styles.trustSurveyButtonText}>Looks good</Text>
-                          </Pressable>
-                          <Pressable
-                            style={styles.trustSurveyButtonSecondary}
-                            onPress={() => handleTrustSurveySubmit('no')}
-                            disabled={trustSurveySubmitting}>
-                            <Text
-                              style={[
-                                styles.trustSurveyButtonText,
-                                styles.trustSurveyButtonTextSecondary,
-                              ]}>
-                              Seems off
-                            </Text>
-                          </Pressable>
-                        </View>
-                      </>
-                    )}
-                  </View>
-                ) : null}
-              </>
-            ) : null}
-            </View>
-
-            <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Your Party</Text>
-            <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Name</Text>
-                <Text style={styles.detailValue}>{guestName?.trim() || 'Anonymous'}</Text>
-            </View>
-            <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Party Size</Text>
-                <Text style={styles.detailValue}>{partySize ?? '—'}</Text>
-            </View>
-            </View>
-
-            {isActive ? (
-            <View style={styles.actions}>
-                <Pressable
-                style={[styles.leaveButton, leaveLoading ? styles.leaveButtonDisabled : undefined]}
-                onPress={confirmLeave}
-                disabled={leaveLoading}>
-                {leaveLoading ? (
-                    <ActivityIndicator color="#fff" />
-                ) : (
-                    <Text style={styles.leaveButtonText}>Leave Queue</Text>
-                )}
-                </Pressable>
-            </View>
-            ) : null}
-        </ScrollView>
-        {webLeaveModal}
-        </SafeAreaProvider>
+      <Pressable
+        style={[styles.pushButton, pushReady && styles.pushButtonActive]}
+        onPress={async () => {
+          if (pushReady) {
+            await disablePush();
+          } else if (sessionId && partyId) {
+            await enablePush();
+          } else {
+            showModal({
+              title: 'Unable to Enable Notifications',
+              message: 'Please wait for the connection to be established.',
+            });
+          }
+        }}>
+        <Bell size={16} color={pushReady ? '#fff' : '#1f6feb'} />
+        {pushReady ? <Check size={14} color="#fff" /> : null}
+        <Text style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>
+          {pushReady ? 'Notifications on' : 'Enable notifications'}
+        </Text>
+      </Pressable>
     );
+  };
+
+  // Render metrics grid
+  const renderMetricsGrid = (useDesktopStyles = false) => (
+    <View style={useDesktopStyles ? styles.desktopMetricsGrid : styles.metricsGrid}>
+      <View style={useDesktopStyles ? styles.desktopMetricItem : styles.metricItem}>
+        <Text style={useDesktopStyles ? styles.desktopMetricLabel : styles.metricLabel}>
+          Your Position
+        </Text>
+        <Text style={useDesktopStyles ? styles.desktopMetricValue : styles.metricValue}>
+          {typeof position === 'number' ? `#${position}` : '—'}
+        </Text>
+      </View>
+      <View style={useDesktopStyles ? styles.desktopMetricItem : styles.metricItem}>
+        <Text style={useDesktopStyles ? styles.desktopMetricLabel : styles.metricLabel}>
+          Ahead of You
+        </Text>
+        <Text style={useDesktopStyles ? styles.desktopMetricValue : styles.metricValue}>
+          {aheadDisplay != null ? `${aheadDisplay}` : '—'}
+        </Text>
+      </View>
+      <View style={useDesktopStyles ? styles.desktopMetricItem : styles.metricItem}>
+        <Text style={useDesktopStyles ? styles.desktopMetricLabel : styles.metricLabel}>
+          Queue Size
+        </Text>
+        <Text style={useDesktopStyles ? styles.desktopMetricValue : styles.metricValue}>
+          {queueLengthDisplay != null ? `${queueLengthDisplay}` : '—'}
+        </Text>
+      </View>
+      <View style={useDesktopStyles ? styles.desktopMetricItem : styles.metricItem}>
+        <Text style={useDesktopStyles ? styles.desktopMetricLabel : styles.metricLabel}>
+          Est. Wait
+        </Text>
+        <Text style={useDesktopStyles ? styles.desktopMetricValue : styles.metricValue}>
+          {etaText}
+        </Text>
+      </View>
+    </View>
+  );
+
+  // Render trust survey
+  const renderTrustSurvey = () => {
+    if (trustSurveyStatus === 'submitted') {
+      return <Text style={styles.trustSurveyThanks}>Thanks for the feedback!</Text>;
+    }
+    return (
+      <>
+        <Text style={styles.trustSurveyPrompt}>Does this queue info seem accurate?</Text>
+        <View style={styles.trustSurveyButtons}>
+          <Pressable
+            style={styles.trustSurveyButtonPrimary}
+            onPress={() => handleTrustSurveySubmit('yes')}
+            disabled={trustSurveySubmitting}>
+            <Text style={styles.trustSurveyButtonText}>Looks good</Text>
+          </Pressable>
+          <Pressable
+            style={styles.trustSurveyButtonSecondary}
+            onPress={() => handleTrustSurveySubmit('no')}
+            disabled={trustSurveySubmitting}>
+            <Text style={[styles.trustSurveyButtonText, styles.trustSurveyButtonTextSecondary]}>
+              Seems off
+            </Text>
+          </Pressable>
+        </View>
+      </>
+    );
+  };
+
+  // Render party details card
+  const renderPartyDetails = (useDesktopStyles = false) => (
+    <View style={useDesktopStyles ? styles.desktopCard : styles.card}>
+      <Text style={styles.sectionTitle}>Your Party</Text>
+      <View style={styles.detailRow}>
+        <Text style={styles.detailLabel}>Name</Text>
+        <Text style={styles.detailValue}>{guestName?.trim() || 'Anonymous'}</Text>
+      </View>
+      <View style={styles.detailRow}>
+        <Text style={styles.detailLabel}>Party Size</Text>
+        <Text style={styles.detailValue}>{partySize ?? '—'}</Text>
+      </View>
+    </View>
+  );
+
+  // Render leave queue button
+  const renderLeaveButton = () => {
+    if (!isActive) return null;
+    return (
+      <View style={styles.actions}>
+        <Pressable
+          style={[styles.leaveButton, leaveLoading ? styles.leaveButtonDisabled : undefined]}
+          onPress={confirmLeave}
+          disabled={leaveLoading}>
+          {leaveLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.leaveButtonText}>Leave Queue</Text>
+          )}
+        </Pressable>
+      </View>
+    );
+  };
+
+  // Desktop layout
+  const renderDesktopLayout = () => (
+    <View style={styles.desktopContainer}>
+      {/* Left column: Status and position */}
+      <View style={styles.desktopStatusColumn}>
+        <View style={styles.desktopCard}>
+          {renderQueueBadge()}
+
+          {/* Position display */}
+          {called ? (
+            <View style={styles.desktopCalledBanner}>
+              <Text style={styles.desktopCalledText}>{"It's your turn!"}</Text>
+              <Text style={styles.desktopCalledSubtext}>
+                Head to the host stand within 2 minutes to keep your spot.
+              </Text>
+              {callDeadline ? (
+                <View style={styles.timerRow}>
+                  <Timer targetTimestamp={callDeadline} label="Time left" compact />
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <View style={styles.desktopPositionDisplay}>
+              <Text style={styles.desktopPositionLabel}>Your Position</Text>
+              <Text style={styles.desktopPositionValue}>
+                {typeof position === 'number' ? `#${position}` : '—'}
+              </Text>
+              {aheadDisplay != null && aheadDisplay > 0 ? (
+                <Text style={styles.desktopPositionSubtext}>
+                  {aheadDisplay} {aheadDisplay === 1 ? 'party' : 'parties'} ahead of you
+                </Text>
+              ) : null}
+            </View>
+          )}
+
+          <Text style={styles.statusText}>{statusText}</Text>
+          {infoMessage ? <Text style={styles.infoText}>{infoMessage}</Text> : null}
+          {isActive ? <Text style={styles.connectionText}>{connectionLabel}</Text> : null}
+        </View>
+
+        {/* Metrics card - always visible on desktop */}
+        {isActive ? (
+          <View style={styles.desktopCard}>
+            <Text style={styles.sectionTitle}>Queue Details</Text>
+            {renderMetricsGrid(true)}
+            <View style={{ marginTop: 16 }}>{renderTrustSurvey()}</View>
+          </View>
+        ) : null}
+      </View>
+
+      {/* Right column: Party details and actions */}
+      <View style={styles.desktopDetailsColumn}>
+        <View style={styles.desktopStickyDetails}>
+          {renderPartyDetails(true)}
+
+          {/* Notification and actions card */}
+          {isActive ? (
+            <View style={styles.desktopCard}>
+              <Text style={styles.sectionTitle}>Actions</Text>
+              {renderNotificationButton()}
+              <View style={{ marginTop: 16 }}>{renderLeaveButton()}</View>
+            </View>
+          ) : null}
+
+          {/* Info card */}
+          <View style={styles.desktopInfoCard}>
+            <Text style={styles.desktopInfoTitle}>Keep this page open</Text>
+            <Text style={styles.desktopInfoText}>
+              {
+                "We'll notify you when it's your turn. You can also enable browser notifications to get alerts even when this tab is in the background."
+              }
+            </Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+
+  // Mobile layout
+  const renderMobileLayout = () => (
+    <ScrollView contentContainerStyle={styles.scroll}>
+      <Text style={styles.title}>Your Spot</Text>
+
+      <View style={styles.card}>
+        {renderQueueBadge()}
+        <Text style={styles.statusText}>{statusText}</Text>
+        {infoMessage ? <Text style={styles.infoText}>{infoMessage}</Text> : null}
+        {isActive ? (
+          <>
+            <Text style={styles.connectionText}>{connectionLabel}</Text>
+            {called ? <Text style={styles.calledText}>{"It's your turn!"}</Text> : null}
+            {called && callDeadline ? (
+              <View style={styles.timerRow}>
+                <Timer targetTimestamp={callDeadline} label="Time left" compact />
+              </View>
+            ) : null}
+            {renderNotificationButton()}
+
+            <View style={styles.metricsDivider} />
+
+            <Pressable
+              style={styles.metricsHeader}
+              onPress={() => setMetricsExpanded((prev) => !prev)}>
+              <Text style={styles.sectionTitle}>Queue details</Text>
+              {metricsExpanded ? (
+                <ChevronUp size={18} color="#586069" />
+              ) : (
+                <ChevronDown size={18} color="#586069" />
+              )}
+            </Pressable>
+
+            {metricsExpanded ? (
+              <View>
+                {renderMetricsGrid(false)}
+                {renderTrustSurvey()}
+              </View>
+            ) : null}
+          </>
+        ) : null}
+      </View>
+
+      {renderPartyDetails(false)}
+      {renderLeaveButton()}
+    </ScrollView>
+  );
+
+  // Show loading state while recovering partyId from storage
+  if (isRecoveringParams) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#1f6feb" />
+          <Text style={{ marginTop: 16, color: '#586069' }}>Loading your queue position...</Text>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
+
+  return (
+    <SafeAreaProvider style={styles.safe}>
+      {isDesktop ? <ScrollView>{renderDesktopLayout()}</ScrollView> : renderMobileLayout()}
+      {webLeaveModal}
+    </SafeAreaProvider>
+  );
 }

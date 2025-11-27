@@ -1,7 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  RefreshControl,
+  useWindowDimensions,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Plus } from 'lucide-react-native';
 import type { RootStackParamList } from '../../types/navigation';
 import { getMyQueues, buildHostWsUrlFromCode, type MyQueue } from '../../lib/backend';
 import { useAuth } from '../../contexts/AuthContext';
@@ -34,6 +43,8 @@ export default function HostDashboardScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 900;
 
   const fetchQueues = useCallback(async () => {
     try {
@@ -179,19 +190,130 @@ export default function HostDashboardScreen({ navigation }: Props) {
   if (queues.length === 0) {
     return (
       <SafeAreaProvider style={styles.safe}>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.title}>My Queues</Text>
-          <Text style={styles.emptyText}>You have not created any queues yet.</Text>
+        <View style={isDesktop ? styles.desktopEmptyContainer : styles.emptyContainer}>
+          <Text style={isDesktop ? styles.desktopEmptyTitle : styles.title}>My Queues</Text>
+          <Text style={isDesktop ? styles.desktopEmptyText : styles.emptyText}>
+            You have not created any queues yet. Create your first queue to start managing guests.
+          </Text>
           <Pressable
-            style={styles.createButton}
+            style={isDesktop ? styles.desktopCreateButton : styles.createButton}
             onPress={() => navigation.navigate('MakeQueueScreen', undefined)}>
-            <Text style={styles.createButtonText}>Create Your First Queue</Text>
+            {isDesktop && <Plus size={18} color="#fff" />}
+            <Text style={isDesktop ? styles.desktopCreateButtonText : styles.createButtonText}>
+              Create Your First Queue
+            </Text>
           </Pressable>
         </View>
       </SafeAreaProvider>
     );
   }
 
+  // Render a queue card (shared between desktop and mobile)
+  const renderQueueCard = (queue: MyQueue, useDesktopStyles = false) => (
+    <Pressable
+      key={queue.id}
+      style={({ pressed }) => [
+        useDesktopStyles ? styles.desktopQueueCard : styles.queueCard,
+        pressed && (useDesktopStyles ? styles.desktopQueueCardPressed : styles.queueCardPressed),
+      ]}
+      onPress={() => handleQueuePress(queue)}>
+      <View style={useDesktopStyles ? styles.desktopQueueHeader : styles.queueHeader}>
+        <Text
+          style={useDesktopStyles ? styles.desktopQueueName : styles.queueName}
+          numberOfLines={1}>
+          {queue.eventName || 'Unnamed Queue'}
+        </Text>
+        <View
+          style={[
+            useDesktopStyles ? styles.desktopStatusBadge : styles.statusBadge,
+            queue.status === 'active' ? styles.statusActive : styles.statusClosed,
+          ]}>
+          <Text
+            style={[
+              styles.statusText,
+              queue.status === 'active' ? styles.statusTextActive : styles.statusTextClosed,
+            ]}>
+            {queue.status === 'active' ? 'Active' : 'Closed'}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={styles.queueCode}>Code: {queue.shortCode}</Text>
+
+      <View style={useDesktopStyles ? styles.desktopStatsRow : styles.statsRow}>
+        <View style={useDesktopStyles ? styles.desktopStatItem : styles.statItem}>
+          <Text style={useDesktopStyles ? styles.desktopStatValue : styles.statValue}>
+            {queue.stats.activeCount}
+          </Text>
+          <Text style={useDesktopStyles ? styles.desktopStatLabel : styles.statLabel}>
+            In Queue
+          </Text>
+        </View>
+        <View style={useDesktopStyles ? styles.desktopStatItem : styles.statItem}>
+          <Text style={useDesktopStyles ? styles.desktopStatValue : styles.statValue}>
+            {queue.stats.servedCount}
+          </Text>
+          <Text style={useDesktopStyles ? styles.desktopStatLabel : styles.statLabel}>Served</Text>
+        </View>
+        <View style={useDesktopStyles ? styles.desktopStatItem : styles.statItem}>
+          <Text style={useDesktopStyles ? styles.desktopStatValue : styles.statValue}>
+            {queue.stats.leftCount}
+          </Text>
+          <Text style={useDesktopStyles ? styles.desktopStatLabel : styles.statLabel}>Left</Text>
+        </View>
+        <View style={useDesktopStyles ? styles.desktopStatItem : styles.statItem}>
+          <Text style={useDesktopStyles ? styles.desktopStatValue : styles.statValue}>
+            {formatDuration(queue.stats.avgWaitSeconds)}
+          </Text>
+          <Text style={useDesktopStyles ? styles.desktopStatLabel : styles.statLabel}>
+            Avg Wait
+          </Text>
+        </View>
+      </View>
+
+      <View style={useDesktopStyles ? styles.desktopQueueMeta : styles.queueMeta}>
+        <Text style={styles.queueDate}>Created {formatDate(queue.createdAt)}</Text>
+        {queue.requiresAuth && (
+          <View style={styles.authBadge}>
+            <Text style={styles.authBadgeText}>Login Required</Text>
+          </View>
+        )}
+      </View>
+    </Pressable>
+  );
+
+  // Desktop layout
+  if (isDesktop) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.desktopScrollContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}>
+          <View style={styles.desktopHeader}>
+            <View style={styles.desktopTitleGroup}>
+              <Text style={styles.desktopTitle}>My Queues</Text>
+              <Text style={styles.desktopSubtitle}>
+                {queues.length} {queues.length === 1 ? 'queue' : 'queues'}
+              </Text>
+            </View>
+            <Pressable
+              style={styles.desktopCreateButton}
+              onPress={() => navigation.navigate('MakeQueueScreen', undefined)}>
+              <Plus size={18} color="#fff" />
+              <Text style={styles.desktopCreateButtonText}>Create Queue</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.desktopQueueGrid}>
+            {queues.map((queue) => renderQueueCard(queue, true))}
+          </View>
+        </ScrollView>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Mobile layout
   return (
     <SafeAreaProvider style={styles.safe}>
       <ScrollView
@@ -203,61 +325,7 @@ export default function HostDashboardScreen({ navigation }: Props) {
           {queues.length} {queues.length === 1 ? 'queue' : 'queues'}
         </Text>
 
-        {queues.map((queue) => (
-          <Pressable
-            key={queue.id}
-            style={({ pressed }) => [styles.queueCard, pressed && styles.queueCardPressed]}
-            onPress={() => handleQueuePress(queue)}>
-            <View style={styles.queueHeader}>
-              <Text style={styles.queueName} numberOfLines={1}>
-                {queue.eventName || 'Unnamed Queue'}
-              </Text>
-              <View
-                style={[
-                  styles.statusBadge,
-                  queue.status === 'active' ? styles.statusActive : styles.statusClosed,
-                ]}>
-                <Text
-                  style={[
-                    styles.statusText,
-                    queue.status === 'active' ? styles.statusTextActive : styles.statusTextClosed,
-                  ]}>
-                  {queue.status === 'active' ? 'Active' : 'Closed'}
-                </Text>
-              </View>
-            </View>
-
-            <Text style={styles.queueCode}>Code: {queue.shortCode}</Text>
-
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{queue.stats.activeCount}</Text>
-                <Text style={styles.statLabel}>In Queue</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{queue.stats.servedCount}</Text>
-                <Text style={styles.statLabel}>Served</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{queue.stats.leftCount}</Text>
-                <Text style={styles.statLabel}>Left</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue}>{formatDuration(queue.stats.avgWaitSeconds)}</Text>
-                <Text style={styles.statLabel}>Avg Wait</Text>
-              </View>
-            </View>
-
-            <View style={styles.queueMeta}>
-              <Text style={styles.queueDate}>Created {formatDate(queue.createdAt)}</Text>
-              {queue.requiresAuth && (
-                <View style={styles.authBadge}>
-                  <Text style={styles.authBadgeText}>Login Required</Text>
-                </View>
-              )}
-            </View>
-          </Pressable>
-        ))}
+        {queues.map((queue) => renderQueueCard(queue, false))}
       </ScrollView>
     </SafeAreaProvider>
   );
