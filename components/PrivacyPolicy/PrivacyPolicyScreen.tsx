@@ -11,9 +11,6 @@ function PrivacyPolicyScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
-  const handleOpenCookiePolicy = () => {
-    void Linking.openURL('https://forkfriends.github.io/');
-  };
 
   const handleOpenCookieYes = () => {
     void Linking.openURL(
