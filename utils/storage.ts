@@ -14,6 +14,7 @@ const HOST_AUTH_PREFIX = 'queueup-host-auth:';
 const TRUST_SURVEY_PREFIX = 'queueup-trust-survey:';
 const QUEUES_LAST_SYNC_KEY = 'queueup-queues-last-sync';
 const MEMBERSHIPS_LAST_SYNC_KEY = 'queueup-memberships-last-sync';
+const SYNC_KEYS = [QUEUES_LAST_SYNC_KEY, MEMBERSHIPS_LAST_SYNC_KEY];
 
 // Cache TTL: 5 minutes
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -98,6 +99,24 @@ export type TrustSurveyResponse = {
 };
 
 export const storage = {
+  async clearQueuesCache(): Promise<void> {
+    const keysToClear = [ACTIVE_QUEUES_KEY, JOINED_QUEUES_KEY, ...SYNC_KEYS];
+
+    if (Platform.OS === 'web') {
+      try {
+        keysToClear.forEach((key) => window.localStorage.removeItem(key));
+      } catch {
+        // Fall back to AsyncStorage on web if localStorage fails
+      }
+    }
+
+    try {
+      await AsyncStorage.multiRemove(keysToClear);
+    } catch (error) {
+      console.warn('Failed to clear queue caches:', error);
+    }
+  },
+
   // ============================================
   // Active Queues (Host-owned queues)
   // ============================================
