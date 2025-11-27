@@ -184,6 +184,7 @@ export async function joinQueue({
   size,
   turnstileToken,
 }: JoinQueueParams): Promise<JoinQueueResult> {
+  const headers = await getAuthHeaders();
   const payload = {
     name: name?.trim() || undefined,
     size: size && Number.isFinite(size) ? size : undefined,
@@ -192,7 +193,7 @@ export async function joinQueue({
 
   const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/join`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     credentials: 'include', // Include session cookie for auth
     body: JSON.stringify(payload),
   });

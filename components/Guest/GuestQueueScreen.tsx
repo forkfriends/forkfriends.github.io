@@ -418,7 +418,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       if (subscription) {
         await subscription.unsubscribe();
         setPushReady(false);
-        setPushMessage(null);
         void trackEvent('push_denied', {
           sessionId,
           partyId,
@@ -433,7 +432,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         });
       } else {
         setPushReady(false);
-        setPushMessage(null);
         void trackEvent('push_denied', {
           sessionId,
           partyId,
@@ -479,7 +477,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       const hasPushManager = 'PushManager' in window;
       const hasNotificationApi = typeof Notification !== 'undefined';
       if (!hasServiceWorker || !hasPushManager || !hasNotificationApi) {
-        setPushMessage('Notifications not supported in this browser.');
         void trackEvent('push_denied', {
           sessionId,
           partyId,
@@ -512,7 +509,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         });
       };
       try {
-        setPushMessage('Enabling notifications…');
         logPushMetric('push_prompt_shown');
         const publicKey = await getVapidPublicKey();
         if (!publicKey) {
@@ -545,7 +541,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         if (!subscription) {
           const perm = await requestPermission();
           if (perm !== 'granted') {
-            setPushMessage('Notifications are blocked in your browser settings.');
             logPushMetric('push_denied', { reason: perm });
             if (!options?.silent) {
               showModal({
@@ -578,7 +573,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         });
         logPushMetric('push_granted', { subscriptionState });
         setPushReady(true);
-        setPushMessage('Notifications on');
         if (!options?.silent) {
           showModal({
             title: 'Notifications enabled',
@@ -590,7 +584,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         logPushMetric('push_denied', {
           reason: e instanceof Error ? e.message : 'unknown_error',
         });
-        setPushMessage('Unable to enable notifications right now.');
         if (!options?.silent) {
           showModal({
             title: 'Failed to enable push',
@@ -612,7 +605,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     }
     autoPushAttemptRef.current = key;
     enablePush({ silent: true }).catch(() => {
-      // handled through pushMessage state
+      // handled through push state
     });
   }, [isWeb, sessionId, partyId, pushReady, enablePush]);
 
