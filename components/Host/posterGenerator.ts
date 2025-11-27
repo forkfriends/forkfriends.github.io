@@ -185,7 +185,7 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 
 async function generateQrBlob(data: string): Promise<Blob> {
   const module = await import('qr-code-styling');
-  const QRCodeStylingCtor = (module.default ?? (module as any).QRCodeStyling) as any;
+  const QRCodeStylingCtor = (module.default ?? (module as any).QRCodeStyling ?? module) as any;
   if (!QRCodeStylingCtor) {
     throw new Error('QR generator unavailable');
   }
