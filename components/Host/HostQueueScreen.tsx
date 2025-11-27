@@ -24,6 +24,7 @@ import {
   closeQueueHost,
   HostParty,
   buildHostConnectUrl,
+  buildHostWsUrlFromCode,
 } from '../../lib/backend';
 import { Feather } from '@expo/vector-icons';
 import { ArrowLeft } from 'lucide-react-native';
@@ -136,12 +137,30 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       try {
         const activeQueues = await storage.getActiveQueues();
         const activeQueue = activeQueues.find((q) => q.code === code);
-        if (activeQueue?.sessionId && activeQueue?.wsUrl) {
+        if (activeQueue?.sessionId) {
+          // Try to get host auth token from dedicated storage as fallback
+          // This is important because the merged queue data from server may not include hostAuthToken
+          let hostAuthToken = activeQueue.hostAuthToken;
+          if (!hostAuthToken && activeQueue.sessionId) {
+            const storedToken = await storage.getHostAuth(activeQueue.sessionId);
+            if (storedToken) {
+              hostAuthToken = storedToken;
+            }
+          }
+
+          // Build wsUrl from code if not present in storage (server-synced queues don't have wsUrl)
+          const wsUrl = activeQueue.wsUrl || buildHostWsUrlFromCode(code);
+
+          // Set hostToken directly here to avoid race condition with isRecoveringParams
+          if (hostAuthToken) {
+            setHostToken(hostAuthToken);
+          }
+
           setRecoveredParams({
             sessionId: activeQueue.sessionId,
-            wsUrl: activeQueue.wsUrl,
+            wsUrl,
             joinUrl: activeQueue.joinUrl,
-            hostAuthToken: activeQueue.hostAuthToken,
+            hostAuthToken,
             eventName: activeQueue.eventName,
             maxGuests: activeQueue.maxGuests,
             location: activeQueue.location,
@@ -428,6 +447,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, [hasHostAuth, snapshotUrl, poll]);
 
   useEffect(() => {
+    // Don't show auth error while still recovering params from storage
+    if (isRecoveringParams) {
+      return;
+    }
+
     if (!hasHostAuth) {
       setConnectionState('closed');
       setConnectionError(
@@ -441,7 +465,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       clearReconnectTimeout();
       stopPolling();
     };
-  }, [startPolling, clearReconnectTimeout, stopPolling, hasHostAuth]);
+  }, [startPolling, clearReconnectTimeout, stopPolling, hasHostAuth, isRecoveringParams]);
 
   const queueCount = queue.length;
   const shareableLink = joinUrl ?? null;
