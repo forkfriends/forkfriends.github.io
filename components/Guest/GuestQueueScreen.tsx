@@ -134,7 +134,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     'idle'
   );
   const [pushReady, setPushReady] = useState(false);
-  const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveConfirmVisibleWeb, setLeaveConfirmVisibleWeb] = useState(false);
   const [isActive, setIsActive] = useState(true);
