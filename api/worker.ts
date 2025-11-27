@@ -13,6 +13,7 @@ import {
   createExchangeToken,
   createOAuthState,
   createSession,
+  deleteAllUserSessions,
   deleteSession,
   exchangeCodeForToken,
   exchangeGoogleCodeForToken,
@@ -24,6 +25,7 @@ import {
   isAdmin,
   isValidRedirectUri,
   requireAdmin,
+  sanitizeReturnTo,
   validateExchangeToken,
   validateOAuthState,
   validateSession,
@@ -124,10 +126,16 @@ export default {
         return applyCors(jsonError('GitHub OAuth not configured', 500), corsOrigin);
       }
 
+      // Rate limit: 20 OAuth starts per minute per IP
+      const clientIp = getClientIp(request);
+      if (await isRateLimited(env, `oauth:${clientIp}`, 20, 60, true)) {
+        return applyCors(jsonError('Too many requests', 429), corsOrigin);
+      }
+
       const rawPlatform = url.searchParams.get('platform');
       const platform: 'web' | 'native' = rawPlatform === 'native' ? 'native' : 'web';
       const redirectUri = url.searchParams.get('redirect_uri') || null;
-      const returnTo = url.searchParams.get('return_to') || null;
+      const returnTo = sanitizeReturnTo(url.searchParams.get('return_to'));
 
       // Validate redirect_uri if provided (for native apps)
       if (redirectUri && !isValidRedirectUri(redirectUri)) {
@@ -230,15 +238,17 @@ export default {
           successUrl.origin !== url.origin;
 
         if (isCrossOrigin) {
-          // For cross-origin: use exchange token (cookies won't work cross-origin)
+          // For cross-origin: use exchange token in URL fragment (cookies won't work cross-origin)
+          // Using fragment prevents token leakage via Referer header
           const exchangeToken = await createExchangeToken(env.DB, user.id);
-          successUrl.searchParams.set('exchange_token', exchangeToken);
-          successUrl.searchParams.set('auth', 'success');
-          // Pass through return_to for post-auth navigation
+          const fragmentParams = new URLSearchParams();
+          fragmentParams.set('exchange_token', exchangeToken);
+          fragmentParams.set('auth', 'success');
           if (stateData.returnTo) {
-            successUrl.searchParams.set('return_to', stateData.returnTo);
+            fragmentParams.set('return_to', stateData.returnTo);
           }
-          return Response.redirect(successUrl.toString(), 302);
+          const redirectUrl = `${successUrl.origin}${successUrl.pathname}#${fragmentParams.toString()}`;
+          return Response.redirect(redirectUrl, 302);
         }
 
         // For same-origin web: set HttpOnly cookie and redirect
@@ -248,7 +258,7 @@ export default {
           successUrl.searchParams.set('return_to', stateData.returnTo);
         }
 
-        const sessionCookieMaxAge = 30 * 24 * 60 * 60; // 30 days
+        const sessionCookieMaxAge = 14 * 24 * 60 * 60; // 14 days
         const headers = new Headers({
           Location: successUrl.toString(),
         });
@@ -274,10 +284,16 @@ export default {
         return applyCors(jsonError('Google OAuth not configured', 500), corsOrigin);
       }
 
+      // Rate limit: 20 OAuth starts per minute per IP (shared with GitHub)
+      const clientIp = getClientIp(request);
+      if (await isRateLimited(env, `oauth:${clientIp}`, 20, 60, true)) {
+        return applyCors(jsonError('Too many requests', 429), corsOrigin);
+      }
+
       const rawPlatform = url.searchParams.get('platform');
       const platform: 'web' | 'native' = rawPlatform === 'native' ? 'native' : 'web';
       const redirectUri = url.searchParams.get('redirect_uri') || null;
-      const returnTo = url.searchParams.get('return_to') || null;
+      const returnTo = sanitizeReturnTo(url.searchParams.get('return_to'));
 
       // Validate redirect_uri if provided (for native apps)
       if (redirectUri && !isValidRedirectUri(redirectUri)) {
@@ -398,15 +414,17 @@ export default {
           successUrl.origin !== url.origin;
 
         if (isCrossOrigin) {
-          // For cross-origin: use exchange token (cookies won't work cross-origin)
+          // For cross-origin: use exchange token in URL fragment (cookies won't work cross-origin)
+          // Using fragment prevents token leakage via Referer header
           const exchangeToken = await createExchangeToken(env.DB, user.id);
-          successUrl.searchParams.set('exchange_token', exchangeToken);
-          successUrl.searchParams.set('auth', 'success');
-          // Pass through return_to for post-auth navigation
+          const fragmentParams = new URLSearchParams();
+          fragmentParams.set('exchange_token', exchangeToken);
+          fragmentParams.set('auth', 'success');
           if (stateData.returnTo) {
-            successUrl.searchParams.set('return_to', stateData.returnTo);
+            fragmentParams.set('return_to', stateData.returnTo);
           }
-          return Response.redirect(successUrl.toString(), 302);
+          const redirectUrl = `${successUrl.origin}${successUrl.pathname}#${fragmentParams.toString()}`;
+          return Response.redirect(redirectUrl, 302);
         }
 
         // For same-origin web: set HttpOnly cookie and redirect
@@ -416,7 +434,7 @@ export default {
           successUrl.searchParams.set('return_to', stateData.returnTo);
         }
 
-        const sessionCookieMaxAge = 30 * 24 * 60 * 60; // 30 days
+        const sessionCookieMaxAge = 14 * 24 * 60 * 60; // 14 days
         const headers = new Headers({
           Location: successUrl.toString(),
         });
@@ -434,6 +452,12 @@ export default {
 
     // Exchange token for session (native apps)
     if (request.method === 'POST' && url.pathname === '/api/auth/exchange') {
+      // Rate limit: 10 attempts per minute per IP
+      const clientIp = getClientIp(request);
+      if (await isRateLimited(env, `exchange:${clientIp}`, 10, 60, true)) {
+        return applyCors(jsonError('Too many requests', 429), corsOrigin);
+      }
+
       try {
         const payload = await readJson(request);
         const exchangeToken = payload?.exchange_token;
@@ -553,6 +577,40 @@ export default {
       }
     }
 
+    // Logout from all devices
+    if (request.method === 'POST' && url.pathname === '/api/auth/logout-all') {
+      try {
+        const sessionId = getSessionFromRequest(request);
+        if (!sessionId) {
+          return applyCors(jsonError('Authentication required', 401), corsOrigin);
+        }
+
+        const user = await validateSession(env.DB, sessionId);
+        if (!user) {
+          return applyCors(jsonError('Invalid session', 401), corsOrigin);
+        }
+
+        // Delete all sessions for this user
+        const deletedCount = await deleteAllUserSessions(env.DB, user.id);
+
+        const headers = new Headers({
+          'content-type': 'application/json',
+        });
+        headers.append('Set-Cookie', buildClearSessionCookie());
+
+        return applyCors(
+          new Response(JSON.stringify({ success: true, sessionsRevoked: deletedCount }), {
+            status: 200,
+            headers,
+          }),
+          corsOrigin
+        );
+      } catch (e) {
+        console.error('Logout all error:', e);
+        return applyCors(jsonError('Logout failed', 500), corsOrigin);
+      }
+    }
+
     // ============================================
     // Push API Routes
     // ============================================
@@ -658,6 +716,176 @@ export default {
       } catch (e) {
         console.error('queues/mine error:', e);
         return applyCors(jsonError('Failed to fetch queues', 500), corsOrigin);
+      }
+    }
+
+    // GET /api/user/memberships - List all queues the authenticated user has joined as a guest
+    if (request.method === 'GET' && url.pathname === '/api/user/memberships') {
+      try {
+        const sessionId = getSessionFromRequest(request);
+        if (!sessionId) {
+          return applyCors(jsonError('Authentication required', 401), corsOrigin);
+        }
+
+        const user = await validateSession(env.DB, sessionId);
+        if (!user) {
+          return applyCors(jsonError('Invalid session', 401), corsOrigin);
+        }
+
+        // Get all queues the user has joined as a guest (where user_id matches)
+        const result = await env.DB.prepare(
+          `SELECT 
+            p.id as party_id,
+            p.session_id,
+            p.name,
+            p.size,
+            p.status,
+            p.joined_at,
+            p.called_at,
+            p.completed_at,
+            s.short_code,
+            s.event_name,
+            s.status as queue_status,
+            s.location,
+            s.contact_info
+          FROM parties p
+          INNER JOIN sessions s ON p.session_id = s.id
+          WHERE p.user_id = ?1
+          ORDER BY p.joined_at DESC`
+        )
+          .bind(user.id)
+          .all<{
+            party_id: string;
+            session_id: string;
+            name: string | null;
+            size: number;
+            status: string;
+            joined_at: number;
+            called_at: number | null;
+            completed_at: number | null;
+            short_code: string;
+            event_name: string | null;
+            queue_status: string;
+            location: string | null;
+            contact_info: string | null;
+          }>();
+
+        const memberships = (result.results || []).map((m) => ({
+          partyId: m.party_id,
+          sessionId: m.session_id,
+          name: m.name,
+          size: m.size,
+          status: m.status,
+          joinedAt: m.joined_at,
+          calledAt: m.called_at,
+          completedAt: m.completed_at,
+          queue: {
+            shortCode: m.short_code,
+            eventName: m.event_name,
+            status: m.queue_status,
+            location: m.location,
+            contactInfo: m.contact_info,
+          },
+        }));
+
+        return applyCors(
+          new Response(JSON.stringify({ memberships }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+          corsOrigin
+        );
+      } catch (e) {
+        console.error('user/memberships error:', e);
+        return applyCors(jsonError('Failed to fetch memberships', 500), corsOrigin);
+      }
+    }
+
+    // POST /api/user/claim-queues - Claim localStorage queues to user account on login
+    if (request.method === 'POST' && url.pathname === '/api/user/claim-queues') {
+      try {
+        const sessionId = getSessionFromRequest(request);
+        if (!sessionId) {
+          return applyCors(jsonError('Authentication required', 401), corsOrigin);
+        }
+
+        const user = await validateSession(env.DB, sessionId);
+        if (!user) {
+          return applyCors(jsonError('Invalid session', 401), corsOrigin);
+        }
+
+        const payload = await readJson(request);
+        if (!payload || typeof payload !== 'object') {
+          return applyCors(jsonError('Invalid request body', 400), corsOrigin);
+        }
+
+        const { ownedQueues, joinedQueues } = payload as {
+          ownedQueues?: Array<{ sessionId: string; hostAuthToken: string }>;
+          joinedQueues?: Array<{ sessionId: string; partyId: string }>;
+        };
+
+        let claimedOwned = 0;
+        let claimedJoined = 0;
+
+        // Claim owned queues (verify host auth token)
+        if (ownedQueues && Array.isArray(ownedQueues)) {
+          for (const queue of ownedQueues) {
+            if (!queue.sessionId || !queue.hostAuthToken) continue;
+
+            // Verify the host auth token is valid for this session
+            const isValid = await verifyHostCookie(
+              queue.hostAuthToken,
+              queue.sessionId,
+              env.HOST_AUTH_SECRET
+            );
+            if (isValid) {
+              // Update the session to set owner_id (only if not already owned by someone else)
+              const updateResult = await env.DB.prepare(
+                `UPDATE sessions SET owner_id = ?1 WHERE id = ?2 AND (owner_id IS NULL OR owner_id = ?1)`
+              )
+                .bind(user.id, queue.sessionId)
+                .run();
+              if (updateResult.meta.changes > 0) {
+                claimedOwned++;
+              }
+            }
+          }
+        }
+
+        // Claim joined queues (update user_id on parties)
+        if (joinedQueues && Array.isArray(joinedQueues)) {
+          for (const queue of joinedQueues) {
+            if (!queue.sessionId || !queue.partyId) continue;
+
+            // Update the party to set user_id (only if not already claimed by someone else)
+            const updateResult = await env.DB.prepare(
+              `UPDATE parties SET user_id = ?1 WHERE id = ?2 AND session_id = ?3 AND (user_id IS NULL OR user_id = ?1)`
+            )
+              .bind(user.id, queue.partyId, queue.sessionId)
+              .run();
+            if (updateResult.meta.changes > 0) {
+              claimedJoined++;
+            }
+          }
+        }
+
+        return applyCors(
+          new Response(
+            JSON.stringify({
+              success: true,
+              claimedOwned,
+              claimedJoined,
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }
+          ),
+          corsOrigin
+        );
+      } catch (e) {
+        console.error('user/claim-queues error:', e);
+        return applyCors(jsonError('Failed to claim queues', 500), corsOrigin);
       }
     }
 
@@ -1938,6 +2166,12 @@ async function handleCreate(
   url: URL,
   corsOrigin: string | null
 ): Promise<Response> {
+  // Rate limit: 10 queue creations per minute per IP
+  const clientIp = getClientIp(request);
+  if (await isRateLimited(env, `queue-create:${clientIp}`, 10)) {
+    return jsonError('Too many requests', 429);
+  }
+
   const payload = await readJson(request);
   if (!payload || typeof payload !== 'object') {
     return jsonError('Invalid request body', 400);
@@ -2041,7 +2275,6 @@ async function handleCreate(
     bypass: env.TURNSTILE_BYPASS,
     hasSecret: !!env.TURNSTILE_SECRET_KEY,
     hasToken: !!turnstileToken,
-    tokenPreview: turnstileToken?.substring(0, 20),
   });
 
   if (turnstileEnabled) {
@@ -2215,6 +2448,12 @@ async function handleAction(
 }
 
 async function handleJoin(request: Request, env: Env, sessionId: string): Promise<Response> {
+  // Rate limit: 20 queue joins per minute per IP
+  const clientIp = getClientIp(request);
+  if (await isRateLimited(env, `queue-join:${clientIp}`, 20)) {
+    return jsonError('Too many requests', 429);
+  }
+
   const payload = await readJson(request);
   if (!payload) {
     return jsonError('Invalid JSON body', 400);
@@ -2278,7 +2517,6 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
     bypass: env.TURNSTILE_BYPASS,
     hasSecret: !!env.TURNSTILE_SECRET_KEY,
     hasToken: !!turnstileToken,
-    tokenPreview: turnstileToken?.substring(0, 20),
   });
 
   // If Turnstile is enabled, require a valid token
@@ -2626,4 +2864,55 @@ interface TurnstileVerifyResponse {
   'error-codes'?: string[];
   action?: string;
   cdata?: string;
+}
+
+/**
+ * Simple KV-based rate limiter for auth endpoints.
+ * Uses a sliding window approach with 1-minute buckets.
+ *
+ * @param env - Worker environment
+ * @param key - Unique identifier (e.g., IP address or endpoint + IP)
+ * @param limit - Maximum requests allowed per window
+ * @param windowSeconds - Time window in seconds (default 60)
+ * @param failClosed - If true, failures in KV will block the request (fail-closed)
+ * @returns true if rate limited, false otherwise (or on failure when failClosed is true)
+ */
+async function isRateLimited(
+  env: Env,
+  key: string,
+  limit: number,
+  windowSeconds = 60,
+  failClosed = false
+): Promise<boolean> {
+  const now = Math.floor(Date.now() / 1000);
+  const bucket = Math.floor(now / windowSeconds);
+  const kvKey = `ratelimit:${key}:${bucket}`;
+
+  try {
+    const current = await env.QUEUE_KV.get(kvKey);
+    const count = current ? parseInt(current, 10) : 0;
+
+    if (count >= limit) {
+      return true;
+    }
+
+    // Increment counter with TTL equal to window
+    await env.QUEUE_KV.put(kvKey, String(count + 1), {
+      expirationTtl: windowSeconds * 2, // 2x window to handle edge cases
+    });
+
+    return false;
+  } catch (error) {
+    console.error('Rate limit check failed:', error);
+    // Optionally fail closed for sensitive endpoints
+    return failClosed;
+  }
+}
+
+/**
+ * Get client IP address from request headers.
+ * Cloudflare sets CF-Connecting-IP for the real client IP.
+ */
+function getClientIp(request: Request): string {
+  return request.headers.get('CF-Connecting-IP') || 'unknown';
 }

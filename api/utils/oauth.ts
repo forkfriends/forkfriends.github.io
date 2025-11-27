@@ -19,7 +19,7 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
 const STATE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
-const SESSION_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const SESSION_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000; // 14 days (reduced from 30)
 const EXCHANGE_TOKEN_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
 export const AUTH_COOKIE_NAME = 'queueup_session';
@@ -90,6 +90,18 @@ export function generateSecureToken(length: number = 32): string {
   return Array.from(buffer)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+/**
+ * Hash a token using SHA-256 for secure storage
+ * Returns a hex-encoded hash
+ */
+export async function hashToken(token: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(token);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -548,9 +560,12 @@ export const findOrCreateUser = findOrCreateUserFromGitHub;
 
 /**
  * Create a new session for a user
+ * The session ID returned to the client is the raw token.
+ * We store a SHA-256 hash of the token in the database.
  */
 export async function createSession(db: D1Database, userId: string): Promise<Session> {
-  const id = generateSecureToken(32);
+  const rawToken = generateSecureToken(32);
+  const tokenHash = await hashToken(rawToken);
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = Math.floor((Date.now() + SESSION_EXPIRY_MS) / 1000);
 
@@ -558,16 +573,19 @@ export async function createSession(db: D1Database, userId: string): Promise<Ses
     .prepare(
       'INSERT INTO user_sessions (id, user_id, expires_at, created_at) VALUES (?1, ?2, ?3, ?4)'
     )
-    .bind(id, userId, expiresAt, now)
+    .bind(tokenHash, userId, expiresAt, now)
     .run();
 
-  return { id, user_id: userId, expires_at: expiresAt, created_at: now };
+  // Return the raw token to the client (they never see the hash)
+  return { id: rawToken, user_id: userId, expires_at: expiresAt, created_at: now };
 }
 
 /**
  * Validate session and get user
+ * The client provides the raw token; we hash it to look up in DB
  */
 export async function validateSession(db: D1Database, sessionId: string): Promise<User | null> {
+  const tokenHash = await hashToken(sessionId);
   const now = Math.floor(Date.now() / 1000);
 
   const result = await db
@@ -576,7 +594,7 @@ export async function validateSession(db: D1Database, sessionId: string): Promis
        INNER JOIN user_sessions s ON u.id = s.user_id
        WHERE s.id = ?1 AND s.expires_at > ?2`
     )
-    .bind(sessionId, now)
+    .bind(tokenHash, now)
     .first<User>();
 
   return result || null;
@@ -584,30 +602,47 @@ export async function validateSession(db: D1Database, sessionId: string): Promis
 
 /**
  * Delete a session (logout)
+ * The client provides the raw token; we hash it to find in DB
  */
 export async function deleteSession(db: D1Database, sessionId: string): Promise<void> {
-  await db.prepare('DELETE FROM user_sessions WHERE id = ?1').bind(sessionId).run();
+  const tokenHash = await hashToken(sessionId);
+  await db.prepare('DELETE FROM user_sessions WHERE id = ?1').bind(tokenHash).run();
+}
+
+/**
+ * Delete all sessions for a user (logout everywhere)
+ */
+export async function deleteAllUserSessions(db: D1Database, userId: string): Promise<number> {
+  const result = await db
+    .prepare('DELETE FROM user_sessions WHERE user_id = ?1')
+    .bind(userId)
+    .run();
+  return result.meta.changes;
 }
 
 /**
  * Create a short-lived exchange token for native apps
+ * We store the hash, return the raw token to the client
  */
 export async function createExchangeToken(db: D1Database, userId: string): Promise<string> {
-  const token = generateSecureToken(32);
+  const rawToken = generateSecureToken(32);
+  const tokenHash = await hashToken(rawToken);
   const expiresAt = Math.floor((Date.now() + EXCHANGE_TOKEN_EXPIRY_MS) / 1000);
 
   await db
     .prepare('INSERT INTO exchange_tokens (token, user_id, expires_at) VALUES (?1, ?2, ?3)')
-    .bind(token, userId, expiresAt)
+    .bind(tokenHash, userId, expiresAt)
     .run();
 
-  return token;
+  return rawToken;
 }
 
 /**
  * Validate and consume exchange token
+ * The client provides the raw token; we hash it to look up in DB
  */
 export async function validateExchangeToken(db: D1Database, token: string): Promise<string | null> {
+  const tokenHash = await hashToken(token);
   const now = Math.floor(Date.now() / 1000);
 
   // Atomic update-and-return to prevent race conditions (TOCTOU)
@@ -616,7 +651,7 @@ export async function validateExchangeToken(db: D1Database, token: string): Prom
     .prepare(
       'UPDATE exchange_tokens SET used = 1 WHERE token = ?1 AND expires_at > ?2 AND used = 0 RETURNING user_id'
     )
-    .bind(token, now)
+    .bind(tokenHash, now)
     .first<{ user_id: string }>();
 
   if (!row) {
@@ -639,7 +674,7 @@ export function buildSessionCookie(
     `Max-Age=${maxAgeSeconds}`,
     'HttpOnly',
     'Secure',
-    'SameSite=Lax',
+    'SameSite=None', // Required for cross-origin requests with credentials
     'Path=/',
   ];
 
@@ -659,7 +694,7 @@ export function buildClearSessionCookie(domain?: string): string {
     'Max-Age=0',
     'HttpOnly',
     'Secure',
-    'SameSite=Lax',
+    'SameSite=None', // Must match the original cookie's SameSite setting
     'Path=/',
   ];
 
@@ -736,6 +771,31 @@ export function isValidRedirectUri(uri: string): boolean {
     // Invalid URL
     return false;
   }
+}
+
+/**
+ * Validate return_to parameter
+ * Must be a relative path starting with / (no protocol, no host)
+ * Prevents open redirect attacks via return_to parameter
+ */
+export function isValidReturnTo(returnTo: string): boolean {
+  // Must start with / and not contain // (prevents protocol-relative URLs)
+  // Must not contain : before the first / (prevents javascript:, data:, etc.)
+  if (!returnTo.startsWith('/')) return false;
+  if (returnTo.startsWith('//')) return false;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(returnTo)) return false;
+  // Additional check: no backslashes (some browsers normalize \\ to //)
+  if (returnTo.includes('\\')) return false;
+  return true;
+}
+
+/**
+ * Sanitize return_to parameter
+ * Returns the value if valid, null otherwise
+ */
+export function sanitizeReturnTo(returnTo: string | null | undefined): string | null {
+  if (!returnTo) return null;
+  return isValidReturnTo(returnTo) ? returnTo : null;
 }
 
 /**

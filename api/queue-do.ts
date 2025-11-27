@@ -609,9 +609,9 @@ export class QueueDO implements DurableObject {
     const cookieHeader = request.headers.get('Cookie');
     const hostCookie = this.extractCookie(cookieHeader, HOST_COOKIE_NAME);
     const headerToken = request.headers.get('x-host-auth');
-    const queryToken = url.searchParams.get('hostToken');
+    // Security: No longer accept hostToken via query string (prevents Referer leakage)
 
-    const triedTokens = [headerToken, hostCookie, queryToken].filter((token): token is string =>
+    const triedTokens = [headerToken, hostCookie].filter((token): token is string =>
       Boolean(token)
     );
 
@@ -629,8 +629,7 @@ export class QueueDO implements DurableObject {
     if (triedTokens.length > 0) {
       console.warn(
         logPrefix(this.sessionId, 'identifyConnection'),
-        'host authentication failed for provided tokens',
-        triedTokens.map((token) => token.slice(0, 8)).join(',')
+        'host authentication failed for provided tokens'
       );
     } else {
       console.warn(logPrefix(this.sessionId, 'identifyConnection'), 'no host token provided');

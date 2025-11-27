@@ -257,18 +257,18 @@ function toWebSocketUrl(url: string): string {
   return url;
 }
 
-export function buildHostConnectUrl(wsUrl: string, hostAuthToken?: string): string {
-  if (!hostAuthToken) {
-    return toWebSocketUrl(wsUrl);
-  }
-  try {
-    const parsed = new URL(wsUrl);
-    parsed.searchParams.set('hostToken', hostAuthToken);
-    return toWebSocketUrl(parsed.toString());
-  } catch {
-    const separator = wsUrl.includes('?') ? '&' : '?';
-    return toWebSocketUrl(`${wsUrl}${separator}hostToken=${encodeURIComponent(hostAuthToken)}`);
-  }
+/**
+ * Build the WebSocket URL for host connections.
+ *
+ * SECURITY NOTE: Host authentication is now done via headers only (x-host-auth or cookie).
+ * Query string tokens are no longer supported to prevent token leakage via Referer headers.
+ *
+ * @deprecated WebSocket connections should set x-host-auth header instead of using this function.
+ * Use buildHostWsUrlFromCode() and set the header in your WebSocket client.
+ */
+export function buildHostConnectUrl(wsUrl: string, _hostAuthToken?: string): string {
+  // No longer include token in URL - must use headers
+  return toWebSocketUrl(wsUrl);
 }
 
 /**
@@ -454,4 +454,78 @@ export async function getMyQueues(): Promise<GetMyQueuesResult> {
   }
 
   return (await response.json()) as GetMyQueuesResult;
+}
+
+// Types for user memberships (queues joined as guest)
+export interface QueueMembership {
+  partyId: string;
+  sessionId: string;
+  name: string | null;
+  size: number;
+  status: string;
+  joinedAt: number;
+  calledAt: number | null;
+  completedAt: number | null;
+  queue: {
+    shortCode: string;
+    eventName: string | null;
+    status: string;
+    location: string | null;
+    contactInfo: string | null;
+  };
+}
+
+export interface GetMyMembershipsResult {
+  memberships: QueueMembership[];
+}
+
+/**
+ * Get all queues the authenticated user has joined as a guest
+ */
+export async function getMyMemberships(): Promise<GetMyMembershipsResult> {
+  const headers = await getAuthHeaders();
+
+  const response = await fetch(`${API_BASE_URL}/api/user/memberships`, {
+    method: 'GET',
+    credentials: 'include',
+    headers,
+  });
+
+  if (!response.ok) {
+    throw await buildError(response);
+  }
+
+  return (await response.json()) as GetMyMembershipsResult;
+}
+
+export interface ClaimQueuesParams {
+  ownedQueues?: { sessionId: string; hostAuthToken: string }[];
+  joinedQueues?: { sessionId: string; partyId: string }[];
+}
+
+export interface ClaimQueuesResult {
+  success: boolean;
+  claimedOwned: number;
+  claimedJoined: number;
+}
+
+/**
+ * Claim localStorage queues to the authenticated user's account
+ * Called after login to migrate local queue data to server
+ */
+export async function claimQueues(params: ClaimQueuesParams): Promise<ClaimQueuesResult> {
+  const headers = await getAuthHeaders();
+
+  const response = await fetch(`${API_BASE_URL}/api/user/claim-queues`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    throw await buildError(response);
+  }
+
+  return (await response.json()) as ClaimQueuesResult;
 }

@@ -111,4 +111,54 @@ await applyD1Migrations(env.DB, [
       `ALTER TABLE sessions ADD COLUMN owner_id TEXT REFERENCES users(id);`,
     ],
   },
+  {
+    name: '010_add_google_auth.sql',
+    queries: [
+      `ALTER TABLE users ADD COLUMN google_id TEXT;`,
+      `ALTER TABLE users ADD COLUMN google_email TEXT;`,
+      `ALTER TABLE users ADD COLUMN google_name TEXT;`,
+      `ALTER TABLE users ADD COLUMN google_avatar_url TEXT;`,
+      `CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);`,
+      `ALTER TABLE oauth_states ADD COLUMN provider TEXT DEFAULT 'github';`,
+    ],
+  },
+  {
+    name: '011_fix_github_id_nullable.sql',
+    queries: [
+      // Recreate users table with nullable github_id
+      `CREATE TABLE users_new (
+        id TEXT PRIMARY KEY,
+        github_id INTEGER UNIQUE,
+        github_username TEXT,
+        github_avatar_url TEXT,
+        google_id TEXT UNIQUE,
+        google_email TEXT,
+        google_name TEXT,
+        google_avatar_url TEXT,
+        email TEXT,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      );`,
+      `INSERT INTO users_new (id, github_id, github_username, github_avatar_url, google_id, google_email, google_name, google_avatar_url, email, created_at, updated_at)
+       SELECT id, github_id, github_username, github_avatar_url, google_id, google_email, google_name, google_avatar_url, email, created_at, updated_at
+       FROM users;`,
+      `DROP TABLE users;`,
+      `ALTER TABLE users_new RENAME TO users;`,
+      `CREATE INDEX IF NOT EXISTS idx_users_github_id ON users(github_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`,
+    ],
+  },
+  {
+    name: '012_add_queue_auth.sql',
+    queries: [
+      `ALTER TABLE sessions ADD COLUMN requires_auth INTEGER DEFAULT 0;`,
+      `ALTER TABLE parties ADD COLUMN user_id TEXT REFERENCES users(id);`,
+      `ALTER TABLE oauth_states ADD COLUMN return_to TEXT;`,
+      `CREATE INDEX IF NOT EXISTS idx_sessions_owner_id ON sessions(owner_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_sessions_owner_status ON sessions(owner_id, status);`,
+      `CREATE INDEX IF NOT EXISTS idx_parties_user_id ON parties(user_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_parties_session_user ON parties(session_id, user_id);`,
+    ],
+  },
 ]);

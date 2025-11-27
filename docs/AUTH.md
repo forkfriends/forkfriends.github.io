@@ -5,9 +5,9 @@ QueueUp uses OAuth 2.0 for authentication, supporting both GitHub and Google as 
 ## Overview
 
 - **Providers**: GitHub, Google
-- **Session Management**: 30-day sessions with secure tokens
+- **Session Management**: 14-day sessions with secure hashed tokens
 - **Account Linking**: Accounts with the same email are automatically linked
-- **Admin Access**: Controlled via email whitelist
+- **Admin Access**: Controlled via `ADMIN_EMAILS` environment variable
 
 ## Architecture
 
@@ -83,9 +83,10 @@ QueueUp uses OAuth 2.0 for authentication, supporting both GitHub and Google as 
 6. API exchanges code for token, fetches user info
 7. API finds or creates user (linking by email if exists)
 8. API creates session and exchange token
-9. API redirects to `redirect_uri?auth=success&exchange_token=...`
-10. Frontend exchanges token for session via `/api/auth/exchange`
-11. Frontend stores session token in localStorage
+9. API redirects to `redirect_uri#auth=success&exchange_token=...` (using URL fragment for security)
+10. Frontend reads exchange token from URL fragment
+11. Frontend exchanges token for session via `/api/auth/exchange`
+12. Frontend stores session token in localStorage
 
 ### Native Flow
 
@@ -199,14 +200,23 @@ This works bidirectionally - Google first, then GitHub also links.
 
 ## Admin Access
 
-Admin status is determined by email whitelist in `api/utils/oauth.ts`:
+Admin status is determined by the `ADMIN_EMAILS` environment variable (comma-separated list):
+
+```bash
+# Set in wrangler.toml or as a secret
+ADMIN_EMAILS=admin@example.com,another@example.com
+```
+
+The check in `api/utils/oauth.ts`:
 
 ```typescript
-const ADMIN_EMAILS = ['me@obinnanwachukwu.com'];
-
-export function isAdmin(user: User | null): boolean {
+export function isAdmin(user: User | null, adminEmailsEnv?: string): boolean {
   if (!user) return false;
-  if (user.email && ADMIN_EMAILS.includes(user.email.toLowerCase())) {
+  const adminEmails = (adminEmailsEnv || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (user.email && adminEmails.includes(user.email.toLowerCase())) {
     return true;
   }
   return false;
@@ -227,9 +237,10 @@ Admin users have access to:
 
 ### Token Security
 
-- Session tokens are cryptographically random (32 bytes)
-- Exchange tokens are single-use and expire after 5 minutes
-- Sessions expire after 30 days
+- Session tokens are cryptographically random (32 bytes), stored as SHA-256 hashes in DB
+- Exchange tokens are single-use, expire after 5 minutes, stored as SHA-256 hashes
+- Sessions expire after 14 days
+- Tokens are sent via URL fragment (not query string) to prevent Referer header leakage
 
 ### Redirect URI Validation
 
@@ -271,6 +282,10 @@ For cross-origin scenarios (e.g., frontend on localhost:8081, API on localhost:8
 
 - `GOOGLE_CLIENT_ID`: Google OAuth client ID
 - `GOOGLE_CLIENT_SECRET`: Google OAuth client secret
+
+### Admin Configuration
+
+- `ADMIN_EMAILS`: Comma-separated list of admin email addresses
 
 ### Cloudflare Setup
 
