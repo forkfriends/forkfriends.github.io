@@ -214,6 +214,8 @@ async function loadQrCodeStylingCtor(): Promise<any> {
 
 async function generateQrBlob(data: string): Promise<Blob> {
   const QRCodeStylingCtor = await loadQrCodeStylingCtor();
+  const module = await import('qr-code-styling');
+  const QRCodeStylingCtor = (module.default ?? (module as any).QRCodeStyling ?? module) as any;
   if (!QRCodeStylingCtor) {
     throw new Error('QR generator unavailable');
   }
