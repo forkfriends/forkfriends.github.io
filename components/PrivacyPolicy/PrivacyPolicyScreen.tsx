@@ -12,11 +12,6 @@ function PrivacyPolicyScreen({ navigation }: Props) {
   const isDesktop = width >= 900;
 
 
-  const handleOpenCookieYes = () => {
-    void Linking.openURL(
-      'https://www.cookieyes.com/?utm_source=PP&utm_medium=footer&utm_campaign=UW'
-    );
-  };
 
   const content = (
     <>
