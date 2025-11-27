@@ -183,39 +183,9 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-async function loadQrCodeStylingCtor(): Promise<any> {
-  const tried: Error[] = [];
-
-  const candidates = [
-    () => import('qr-code-styling'),
-    () => import('qr-code-styling/lib/qr-code-styling.common'),
-    () => import('qr-code-styling/lib/qr-code-styling.cjs'),
-  ];
-
-  for (const loader of candidates) {
-    try {
-      const module = await loader();
-      const ctor = (module as any)?.default ?? (module as any)?.QRCodeStyling ?? (module as any)?.default?.QRCodeStyling;
-      if (ctor) {
-        return ctor;
-      }
-    } catch (error) {
-      if (error instanceof Error) {
-        tried.push(error);
-      }
-    }
-  }
-
-  if (tried.length) {
-    console.error('Failed to load qr-code-styling', tried);
-  }
-  return undefined;
-}
-
 async function generateQrBlob(data: string): Promise<Blob> {
-  const QRCodeStylingCtor = await loadQrCodeStylingCtor();
   const module = await import('qr-code-styling');
-  const QRCodeStylingCtor = (module.default ?? (module as any).QRCodeStyling ?? module) as any;
+  const QRCodeStylingCtor = (module.default ?? (module as any).QRCodeStyling) as any;
   if (!QRCodeStylingCtor) {
     throw new Error('QR generator unavailable');
   }
