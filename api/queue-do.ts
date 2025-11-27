@@ -28,8 +28,10 @@ type ConnectionInfo = { role: 'host' } | { role: 'guest'; partyId: string };
 
 const CALL_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_MAX_GUESTS = 100;
-const AVERAGE_SERVICE_MINUTES = 3;
+const DEFAULT_SERVICE_MS = 3 * 60 * 1000; // 3 minutes fallback
 const MS_PER_MINUTE = 60 * 1000;
+const SERVICE_TIME_CACHE_MS = 5 * 60 * 1000; // Refresh every 5 minutes
+const MIN_SAMPLES_FOR_DYNAMIC_ETA = 3; // Need at least 3 served parties for dynamic ETA
 
 function logPrefix(sessionId: string, scope: string): string {
   return `[QueueDO ${sessionId}] ${scope}:`;
@@ -59,6 +61,10 @@ export class QueueDO implements DurableObject {
   private static readonly MAX_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
   private static readonly HEARTBEAT_INTERVAL_MS = 30 * 1000; // 30 seconds
   private heartbeatTimer: number | null = null;
+
+  // Dynamic ETA model
+  private avgServiceMs: number = DEFAULT_SERVICE_MS;
+  private avgServiceLastUpdated: number = 0;
 
   constructor(
     private readonly state: DurableObjectState,
@@ -118,14 +124,22 @@ export class QueueDO implements DurableObject {
 
       // Force close if exceeded max lifetime
       if (lifetime > QueueDO.MAX_LIFETIME_MS) {
-        console.log(`[QueueDO ${this.sessionId}] Auto-closing: exceeded max lifetime (${Math.round(lifetime / 3600000)}h)`);
+        console.log(
+          `[QueueDO ${this.sessionId}] Auto-closing: exceeded max lifetime (${Math.round(lifetime / 3600000)}h)`
+        );
         await this.handleAutoClose('max_lifetime_exceeded');
         return;
       }
 
       // Auto-close if inactive for too long AND queue is empty
-      if (inactiveDuration > QueueDO.INACTIVE_TIMEOUT_MS && this.queue.length === 0 && !this.nowServing) {
-        console.log(`[QueueDO ${this.sessionId}] Auto-closing: inactive for ${Math.round(inactiveDuration / 60000)} minutes`);
+      if (
+        inactiveDuration > QueueDO.INACTIVE_TIMEOUT_MS &&
+        this.queue.length === 0 &&
+        !this.nowServing
+      ) {
+        console.log(
+          `[QueueDO ${this.sessionId}] Auto-closing: inactive for ${Math.round(inactiveDuration / 60000)} minutes`
+        );
         await this.handleAutoClose('inactivity');
         return;
       }
@@ -174,7 +188,7 @@ export class QueueDO implements DurableObject {
     // Check if a party with the same name already exists in the queue
     if (name && name.trim().length > 0) {
       const normalizedName = name.trim();
-      const existingParty = this.queue.find(p => p.name?.trim() === normalizedName);
+      const existingParty = this.queue.find((p) => p.name?.trim() === normalizedName);
       if (existingParty) {
         return this.jsonError('You are already in this queue', 409);
       }
@@ -189,6 +203,14 @@ export class QueueDO implements DurableObject {
       return this.jsonError('Queue is full', 409);
     }
 
+    // Refresh dynamic ETA model before calculating estimate
+    await this.refreshAvgServiceTime();
+
+    // Calculate estimated wait BEFORE adding to queue
+    const aheadWaiting = this.queue.length;
+    const aheadCount = aheadWaiting + (this.nowServing ? 1 : 0);
+    const estimatedWaitMs = this.estimateWaitMs(aheadCount);
+
     const party: QueueParty = {
       id: crypto.randomUUID(),
       name,
@@ -202,14 +224,18 @@ export class QueueDO implements DurableObject {
 
     const statements = [
       this.env.DB.prepare(
-        "INSERT INTO parties (id, session_id, name, size, status, nearby) VALUES (?1, ?2, ?3, ?4, 'waiting', 0)"
-      ).bind(party.id, this.sessionId, name ?? null, normalizedSize),
+        "INSERT INTO parties (id, session_id, name, size, status, nearby, estimated_wait_ms) VALUES (?1, ?2, ?3, ?4, 'waiting', 0, ?5)"
+      ).bind(party.id, this.sessionId, name ?? null, normalizedSize, estimatedWaitMs),
       this.env.DB.prepare(
         "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'joined', ?3)"
       ).bind(
         this.sessionId,
         party.id,
-        JSON.stringify({ name: party.name ?? null, size: party.size ?? null })
+        JSON.stringify({
+          name: party.name ?? null,
+          size: party.size ?? null,
+          estimated_wait_ms: estimatedWaitMs,
+        })
       ),
     ];
 
@@ -236,11 +262,8 @@ export class QueueDO implements DurableObject {
     this.broadcastGuestPositions();
     await this.triggerPositionPushes();
 
-    const aheadWaiting = this.queue.length - 1;
-    const aheadCount = aheadWaiting + (this.nowServing ? 1 : 0);
     const position = aheadCount + 1;
     const queueLength = this.computeQueueLength();
-    const estimatedWaitMs = this.estimateWaitMs(aheadCount);
 
     return this.jsonResponse({
       partyId: party.id,
@@ -296,16 +319,32 @@ export class QueueDO implements DurableObject {
       return this.jsonError('partyId is required', 400);
     }
 
+    // Capture position and wait time before removal
+    const party = this.findParty(partyId);
+    const positionAtLeave = party ? this.computePosition(partyId).position : null;
+    const waitMsAtLeave = party ? Date.now() - party.joinedAt : null;
+
     const removed = await this.removeParty(partyId, 'left');
     if (!removed) {
       return this.jsonError('Party not found', 404);
     }
 
+    const completedAt = Math.floor(Date.now() / 1000);
     await this.env.DB.batch([
-      this.env.DB.prepare("UPDATE parties SET status = 'left' WHERE id = ?1").bind(partyId),
+      this.env.DB.prepare(
+        "UPDATE parties SET status = 'left', completed_at = ?2, position_at_leave = ?3, wait_ms_at_leave = ?4 WHERE id = ?1"
+      ).bind(partyId, completedAt, positionAtLeave, waitMsAtLeave),
       this.env.DB.prepare(
         "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'left', ?3)"
-      ).bind(this.sessionId, partyId, JSON.stringify({ reason: 'guest_left' })),
+      ).bind(
+        this.sessionId,
+        partyId,
+        JSON.stringify({
+          reason: 'guest_left',
+          position_at_leave: positionAtLeave,
+          wait_ms_at_leave: waitMsAtLeave,
+        })
+      ),
     ]);
 
     return this.jsonResponse({ ok: true });
@@ -327,16 +366,32 @@ export class QueueDO implements DurableObject {
       return this.jsonError('partyId is required', 400);
     }
 
+    // Capture position and wait time before removal
+    const party = this.findParty(partyId);
+    const positionAtLeave = party ? this.computePosition(partyId).position : null;
+    const waitMsAtLeave = party ? Date.now() - party.joinedAt : null;
+
     const removed = await this.removeParty(partyId, 'kicked');
     if (!removed) {
       return this.jsonError('Party not found', 404);
     }
 
+    const completedAt = Math.floor(Date.now() / 1000);
     await this.env.DB.batch([
-      this.env.DB.prepare("UPDATE parties SET status = 'left' WHERE id = ?1").bind(partyId),
+      this.env.DB.prepare(
+        "UPDATE parties SET status = 'kicked', completed_at = ?2, position_at_leave = ?3, wait_ms_at_leave = ?4 WHERE id = ?1"
+      ).bind(partyId, completedAt, positionAtLeave, waitMsAtLeave),
       this.env.DB.prepare(
         "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'left', ?3)"
-      ).bind(this.sessionId, partyId, JSON.stringify({ reason: 'kicked' })),
+      ).bind(
+        this.sessionId,
+        partyId,
+        JSON.stringify({
+          reason: 'kicked',
+          position_at_leave: positionAtLeave,
+          wait_ms_at_leave: waitMsAtLeave,
+        })
+      ),
     ]);
 
     return this.jsonResponse({ ok: true });
@@ -471,7 +526,7 @@ export class QueueDO implements DurableObject {
 
     // Build guest-specific snapshot (same logic as sendGuestInitialState)
     let guestSnapshot: string;
-    
+
     if (this.closed) {
       guestSnapshot = JSON.stringify({ type: 'closed' });
     } else if (this.nowServing && this.nowServing.id === partyId) {
@@ -668,13 +723,21 @@ export class QueueDO implements DurableObject {
         return this.jsonError('servedParty does not match current', 400);
       }
 
+      const completedAt = Math.floor(Date.now() / 1000);
+      const servedPartyData = this.nowServing;
+      const waitMs = servedPartyData ? Date.now() - servedPartyData.joinedAt : null;
+
       await this.env.DB.batch([
-        this.env.DB.prepare("UPDATE parties SET status = 'served' WHERE id = ?1").bind(
-          servedPartyId
-        ),
+        this.env.DB.prepare(
+          "UPDATE parties SET status = 'served', completed_at = ?2 WHERE id = ?1"
+        ).bind(servedPartyId, completedAt),
         this.env.DB.prepare(
           "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'advanced', ?3)"
-        ).bind(this.sessionId, servedPartyId, JSON.stringify({ action: 'served' })),
+        ).bind(
+          this.sessionId,
+          servedPartyId,
+          JSON.stringify({ action: 'served', wait_ms: waitMs })
+        ),
       ]);
 
       this.notifyGuestRemoval(servedPartyId, 'served');
@@ -708,11 +771,12 @@ export class QueueDO implements DurableObject {
       this.nowServing = selectedParty;
       this.pendingPartyId = selectedParty.id;
       this.callDeadline = Date.now() + CALL_TIMEOUT_MS;
+      const calledAt = Math.floor(Date.now() / 1000);
 
       await this.env.DB.batch([
-        this.env.DB.prepare("UPDATE parties SET status = 'called' WHERE id = ?1").bind(
-          selectedParty.id
-        ),
+        this.env.DB.prepare(
+          "UPDATE parties SET status = 'called', called_at = ?2 WHERE id = ?1"
+        ).bind(selectedParty.id, calledAt),
         this.env.DB.prepare(
           "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'advanced', ?3)"
         ).bind(this.sessionId, selectedParty.id, JSON.stringify({ action: 'called' })),
@@ -799,7 +863,12 @@ export class QueueDO implements DurableObject {
     this.notifyGuestRemoval(partyId, reason);
 
     // Emit event for dropped party
-    const eventType = reason === 'left' ? 'QUEUE_MEMBER_LEFT' : reason === 'kicked' ? 'QUEUE_MEMBER_KICKED' : 'QUEUE_MEMBER_DROPPED';
+    const eventType =
+      reason === 'left'
+        ? 'QUEUE_MEMBER_LEFT'
+        : reason === 'kicked'
+          ? 'QUEUE_MEMBER_KICKED'
+          : 'QUEUE_MEMBER_DROPPED';
     await this.emitEvent({
       type: eventType as any,
       sessionId: this.sessionId,
@@ -849,7 +918,16 @@ export class QueueDO implements DurableObject {
    * Events include push notifications, analytics, and D1 logging.
    */
   private async emitEvent(event: {
-    type: 'QUEUE_MEMBER_CALLED' | 'QUEUE_POSITION_2' | 'QUEUE_POSITION_5' | 'QUEUE_MEMBER_DROPPED' | 'QUEUE_MEMBER_SERVED' | 'QUEUE_MEMBER_LEFT' | 'QUEUE_MEMBER_KICKED' | 'QUEUE_CLOSED' | 'QUEUE_MEMBER_JOINED';
+    type:
+      | 'QUEUE_MEMBER_CALLED'
+      | 'QUEUE_POSITION_2'
+      | 'QUEUE_POSITION_5'
+      | 'QUEUE_MEMBER_DROPPED'
+      | 'QUEUE_MEMBER_SERVED'
+      | 'QUEUE_MEMBER_LEFT'
+      | 'QUEUE_MEMBER_KICKED'
+      | 'QUEUE_CLOSED'
+      | 'QUEUE_MEMBER_JOINED';
     sessionId: string;
     partyId?: string;
     reason?: string;
@@ -928,8 +1006,8 @@ export class QueueDO implements DurableObject {
     // - index 0 = position 2 (first in queue after the currently served guest)
     // - index 3 = position 5 (fourth in queue after the currently served guest)
     const candidates: Array<[number, 'pos_2' | 'pos_5']> = [
-      [0, 'pos_2'],  // position 2
-      [3, 'pos_5'],  // position 5
+      [0, 'pos_2'], // position 2
+      [3, 'pos_5'], // position 5
     ];
     for (const [idx, kind] of candidates) {
       const party = this.queue[idx];
@@ -965,7 +1043,10 @@ export class QueueDO implements DurableObject {
     // If user is being called, don't send position updates
     const existing = this.pendingPushes.get(partyId);
     if (existing === 'called') return; // Don't override 'called' with position updates
-    if (kind === 'called' || existing !== 'called') {
+    if (kind === 'called') {
+      this.pendingPushes.set(partyId, kind);
+    } else if (existing !== 'pos_2' || kind === 'pos_2') {
+      // Only set pos_5 if nothing better exists, always allow pos_2
       this.pendingPushes.set(partyId, kind);
     }
   }
@@ -1025,16 +1106,16 @@ export class QueueDO implements DurableObject {
 
     // Process all notifications concurrently for speed
     // Use allSettled to prevent one failure from blocking others
-    await Promise.allSettled(
-      batch.map(([partyId, kind]) => this.sendPushSafe(partyId, kind))
-    );
+    await Promise.allSettled(batch.map(([partyId, kind]) => this.sendPushSafe(partyId, kind)));
   }
 
   private async sendPushSafe(partyId: string, kind: 'called' | 'pos_2' | 'pos_5'): Promise<void> {
     try {
       // VAPID keys are required for push notifications
       if (!this.env.VAPID_PUBLIC || !this.env.VAPID_PRIVATE) {
-        console.error('Missing VAPID_PUBLIC or VAPID_PRIVATE environment variable. Skipping push notification.');
+        console.error(
+          'Missing VAPID_PUBLIC or VAPID_PRIVATE environment variable. Skipping push notification.'
+        );
         return;
       }
 
@@ -1067,7 +1148,11 @@ export class QueueDO implements DurableObject {
 
       const payload = await buildPushPayload(
         { data: JSON.stringify({ title, body }), options: { ttl: 60 } },
-        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth }, expirationTime: null },
+        {
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.p256dh, auth: sub.auth },
+          expirationTime: null,
+        },
         {
           subject: this.env.VAPID_SUBJECT ?? 'mailto:team@queue-up.app',
           publicKey: this.env.VAPID_PUBLIC,
@@ -1081,7 +1166,9 @@ export class QueueDO implements DurableObject {
       });
       if (!resp.ok && (resp.status === 404 || resp.status === 410)) {
         try {
-          await this.env.DB.prepare('DELETE FROM push_subscriptions WHERE session_id=?1 AND party_id=?2')
+          await this.env.DB.prepare(
+            'DELETE FROM push_subscriptions WHERE session_id=?1 AND party_id=?2'
+          )
             .bind(this.sessionId, partyId)
             .run();
         } catch {}
@@ -1097,7 +1184,9 @@ export class QueueDO implements DurableObject {
       const status = e?.status ?? e?.code ?? 0;
       if (status === 404 || status === 410) {
         try {
-          await this.env.DB.prepare('DELETE FROM push_subscriptions WHERE session_id=?1 AND party_id=?2')
+          await this.env.DB.prepare(
+            'DELETE FROM push_subscriptions WHERE session_id=?1 AND party_id=?2'
+          )
             .bind(this.sessionId, partyId)
             .run();
         } catch {}
@@ -1168,7 +1257,10 @@ export class QueueDO implements DurableObject {
     }
 
     const payload = this.buildGuestPositionPayload(partyId);
-    this.safeSend(socket, JSON.stringify({ type: 'position', ...payload, eventName: this.eventName ?? undefined }));
+    this.safeSend(
+      socket,
+      JSON.stringify({ type: 'position', ...payload, eventName: this.eventName ?? undefined })
+    );
   }
 
   private computePosition(partyId: string): { position: number; aheadCount: number } {
@@ -1202,7 +1294,71 @@ export class QueueDO implements DurableObject {
 
   private estimateWaitMs(aheadCount: number): number {
     const safeAhead = Math.max(0, aheadCount);
-    return safeAhead * AVERAGE_SERVICE_MINUTES * MS_PER_MINUTE;
+    return safeAhead * this.avgServiceMs;
+  }
+
+  /**
+   * Refresh the average service time from recent served parties.
+   * Uses exponential weighting to favor recent data.
+   * Only updates if cache has expired.
+   */
+  private async refreshAvgServiceTime(): Promise<void> {
+    const now = Date.now();
+    if (now - this.avgServiceLastUpdated < SERVICE_TIME_CACHE_MS) {
+      return; // Cache is still fresh
+    }
+
+    try {
+      // Get last 20 served parties with valid service times (called_at to completed_at)
+      const result = await this.env.DB.prepare(
+        `SELECT (completed_at - called_at) as service_seconds
+         FROM parties 
+         WHERE session_id = ?1 
+           AND status = 'served' 
+           AND called_at IS NOT NULL 
+           AND completed_at IS NOT NULL
+           AND completed_at > called_at
+         ORDER BY completed_at DESC
+         LIMIT 20`
+      )
+        .bind(this.sessionId)
+        .all<{ service_seconds: number }>();
+
+      const samples = result.results || [];
+
+      if (samples.length >= MIN_SAMPLES_FOR_DYNAMIC_ETA) {
+        // Exponential weighted average: more recent = higher weight
+        // Weights: 1.0, 0.9, 0.81, 0.729, ... (decay factor 0.9)
+        const DECAY = 0.9;
+        let weightedSum = 0;
+        let totalWeight = 0;
+
+        for (let i = 0; i < samples.length; i++) {
+          const weight = Math.pow(DECAY, i);
+          const serviceMs = samples[i].service_seconds * 1000;
+          // Clamp to reasonable range (30 seconds to 30 minutes)
+          const clampedMs = Math.max(30000, Math.min(30 * 60 * 1000, serviceMs));
+          weightedSum += clampedMs * weight;
+          totalWeight += weight;
+        }
+
+        this.avgServiceMs = Math.round(weightedSum / totalWeight);
+        console.log(
+          logPrefix(this.sessionId, 'refreshAvgServiceTime'),
+          `Updated avg service time to ${Math.round(this.avgServiceMs / 1000)}s from ${samples.length} samples`
+        );
+      }
+      // If not enough samples, keep using default/previous value
+
+      this.avgServiceLastUpdated = now;
+    } catch (error) {
+      console.error(
+        logPrefix(this.sessionId, 'refreshAvgServiceTime'),
+        'Failed to refresh:',
+        error
+      );
+      // Keep using existing value on error
+    }
   }
 
   private computeGuestCount(): number {
@@ -1219,7 +1375,11 @@ export class QueueDO implements DurableObject {
     return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 1;
   }
 
-  private toHostParty(party: QueueParty): Omit<QueueParty, 'joinedAt'> & { joinedAt: number } {
+  private toHostParty(
+    party: QueueParty
+  ): Omit<QueueParty, 'joinedAt'> & { joinedAt: number; riskScore: number } {
+    const waitMs = Date.now() - party.joinedAt;
+    const riskScore = this.calculateAbandonmentRisk(waitMs, party.nearby);
     return {
       id: party.id,
       name: party.name,
@@ -1227,7 +1387,47 @@ export class QueueDO implements DurableObject {
       status: party.status,
       nearby: party.nearby,
       joinedAt: party.joinedAt,
+      riskScore,
     };
+  }
+
+  /**
+   * Calculate abandonment risk score (0-100) based on:
+   * - Wait time: longer wait = higher risk
+   * - Nearby status: if declared nearby, lower risk
+   *
+   * Risk curve based on typical abandonment patterns:
+   * - 0-3 min: ~5% base risk
+   * - 3-5 min: ~10% risk
+   * - 5-10 min: ~20% risk
+   * - 10-15 min: ~35% risk
+   * - 15-30 min: ~50% risk
+   * - 30+ min: ~70% risk
+   */
+  private calculateAbandonmentRisk(waitMs: number, isNearby: boolean): number {
+    const waitMinutes = waitMs / MS_PER_MINUTE;
+
+    let baseRisk: number;
+    if (waitMinutes < 3) {
+      baseRisk = 5 + (waitMinutes / 3) * 5; // 5-10%
+    } else if (waitMinutes < 5) {
+      baseRisk = 10 + ((waitMinutes - 3) / 2) * 10; // 10-20%
+    } else if (waitMinutes < 10) {
+      baseRisk = 20 + ((waitMinutes - 5) / 5) * 15; // 20-35%
+    } else if (waitMinutes < 15) {
+      baseRisk = 35 + ((waitMinutes - 10) / 5) * 15; // 35-50%
+    } else if (waitMinutes < 30) {
+      baseRisk = 50 + ((waitMinutes - 15) / 15) * 20; // 50-70%
+    } else {
+      baseRisk = 70 + Math.min((waitMinutes - 30) / 30, 1) * 25; // 70-95%
+    }
+
+    // If party has declared they're nearby, reduce risk by 40%
+    if (isNearby) {
+      baseRisk *= 0.6;
+    }
+
+    return Math.round(Math.min(95, Math.max(0, baseRisk)));
   }
 
   private findParty(partyId: string): QueueParty | undefined {
@@ -1256,11 +1456,9 @@ export class QueueDO implements DurableObject {
       await this.loadFromDatabase();
       await this.persistState();
     }
-    
+
     // Always load eventName from database (it's not stored in KV state)
-    const sessionRow = await this.env.DB.prepare(
-      'SELECT event_name FROM sessions WHERE id = ?1'
-    )
+    const sessionRow = await this.env.DB.prepare('SELECT event_name FROM sessions WHERE id = ?1')
       .bind(this.sessionId)
       .first<{ event_name?: string | null }>();
     this.eventName = sessionRow?.event_name ?? null;
@@ -1300,9 +1498,7 @@ export class QueueDO implements DurableObject {
     if (results) {
       for (const row of results) {
         const sizeValue =
-          typeof row.size === 'number' && Number.isFinite(row.size) && row.size > 0
-            ? row.size
-            : 1;
+          typeof row.size === 'number' && Number.isFinite(row.size) && row.size > 0 ? row.size : 1;
         const party: QueueParty = {
           id: row.id,
           name: row.name ?? undefined,

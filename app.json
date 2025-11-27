@@ -3,6 +3,7 @@
     "name": "QueueUp",
     "slug": "queueup",
     "version": "1.0.0",
+    "scheme": "queueup",
     "web": {
       "favicon": "./assets/favicon.png",
       "output": "single",
@@ -30,19 +31,32 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.queueup.app"
+      "bundleIdentifier": "com.queueup.app",
+      "associatedDomains": ["applinks:queueup-api.danielnwachukwu.workers.dev"]
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.queueup.app"
+      "package": "com.queueup.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "queueup",
+              "host": "auth",
+              "pathPrefix": "/callback"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     }
   }
 }
