@@ -178,6 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleAuthExpired = useCallback(() => {
     console.log('Session expired, clearing auth state');
     clearStoredSessionToken();
+    void storage.clearQueuesCache();
     setSessionToken(null);
     setState({
       user: null,
@@ -448,6 +449,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await clearStoredSessionToken();
     // Clear all host auth tokens to prevent persistence on shared devices
     await storage.clearAllHostAuth();
+    await storage.clearQueuesCache();
     setSessionToken(null);
     setState({
       user: null,
