@@ -4,6 +4,21 @@
     <meta charset="utf-8" />
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover, user-scalable=no" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' https://pagead2.googlesyndication.com https://challenges.cloudflare.com;
+        connect-src 'self' https://queueup-api.danielnwachukwu.workers.dev wss://queueup-api.danielnwachukwu.workers.dev https://api.mapbox.com https://events.mapbox.com https://pagead2.googlesyndication.com;
+        img-src 'self' data: https://avatars.githubusercontent.com https://*.githubusercontent.com https://api.mapbox.com;
+        style-src 'self' 'unsafe-inline';
+        font-src 'self' data:;
+        frame-src https://challenges.cloudflare.com https://googleads.g.doubleclick.net https://tpc.googlesyndication.com;
+        base-uri 'self';
+        form-action 'self';
+        object-src 'none'
+      "
+    />
 
     <!-- PWA Meta Tags -->
     <meta name="application-name" content="QueueUp" />
