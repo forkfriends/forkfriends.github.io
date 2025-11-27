@@ -43,7 +43,7 @@ const ANALYTICS_SCREEN = 'join_queue';
 
 export default function JoinQueueScreen({ navigation, route }: Props) {
   const { showModal } = useModal();
-  const { user, login } = useAuth();
+  const { login } = useAuth();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
   const routeCode =
