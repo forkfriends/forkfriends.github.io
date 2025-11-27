@@ -141,7 +141,6 @@ const STATUS_COLORS: Record<string, string> = {
 export default function AdminDashboardScreen(_props: Props) {
   const { width } = useWindowDimensions();
   const isDesktop = width >= DESKTOP_BREAKPOINT;
-  const isTablet = width >= TABLET_BREAKPOINT && width < DESKTOP_BREAKPOINT;
   const responsiveStyles = createResponsiveStyles(width);
 
   const { user, isLoading: authLoading, isAdmin, login } = useAuth();
