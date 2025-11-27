@@ -118,7 +118,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const storageKey = `queueup-host-auth:${sessionId}`;
 
   const displayEventName = eventName?.trim() || null;
-  const scheduleLine = useMemo(() => formatScheduleLine(openTime, closeTime), [openTime, closeTime]);
+  const scheduleLine = useMemo(
+    () => formatScheduleLine(openTime, closeTime),
+    [openTime, closeTime]
+  );
   const [capacity, setCapacity] = useState<number | null>(
     typeof initialMaxGuests === 'number' ? initialMaxGuests : null
   );
@@ -190,10 +193,22 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         // Ignore storage errors (e.g. private mode)
       }
     })();
-  }, [initialHostAuthToken, storageKey, code, sessionId, wsUrl, joinUrl, eventName, initialMaxGuests]);
+  }, [
+    initialHostAuthToken,
+    storageKey,
+    code,
+    sessionId,
+    wsUrl,
+    joinUrl,
+    eventName,
+    initialMaxGuests,
+  ]);
 
   const snapshotUrl = useMemo(() => {
-    const baseUrl = wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+    const baseUrl = wsUrl
+      .replace('/connect', '/snapshot')
+      .replace('wss://', 'https://')
+      .replace('ws://', 'http://');
     return baseUrl;
   }, [wsUrl]);
   const hasHostAuth = Boolean(hostToken);
@@ -311,7 +326,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const startPolling = useCallback(() => {
     if (!hasHostAuth) {
       setConnectionState('closed');
-      setConnectionError('Missing host authentication. Reopen the host controls on the device that created this queue.');
+      setConnectionError(
+        'Missing host authentication. Reopen the host controls on the device that created this queue.'
+      );
       setConnectionErrorModalVisible(true);
       return;
     }
@@ -342,7 +359,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (!hasHostAuth) {
       setConnectionState('closed');
-      setConnectionError('Missing host authentication. Reopen the host controls on the device that created this queue.');
+      setConnectionError(
+        'Missing host authentication. Reopen the host controls on the device that created this queue.'
+      );
       setConnectionErrorModalVisible(true);
       return;
     }
@@ -369,8 +388,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       lines.push(location.trim());
     }
     const trimmedContact = typeof contactInfo === 'string' ? contactInfo.trim() : '';
-    const isMeaningfulContact = trimmedContact.length > 0 && 
-      !/^(no|n\/a|none|na|-|--)$/i.test(trimmedContact);
+    const isMeaningfulContact =
+      trimmedContact.length > 0 && !/^(no|n\/a|none|na|-|--)$/i.test(trimmedContact);
     if (isMeaningfulContact) {
       lines.push(trimmedContact);
     } else if (typeof capacity === 'number') {
@@ -431,7 +450,16 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setActionLoading(false);
       }
     },
-    [actionLoading, code, hasHostAuth, hostToken, nowServing?.id, poll, queue.length, trackHostAction]
+    [
+      actionLoading,
+      code,
+      hasHostAuth,
+      hostToken,
+      nowServing?.id,
+      poll,
+      queue.length,
+      trackHostAction,
+    ]
   );
 
   const advanceSpecific = useCallback(
@@ -451,17 +479,17 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     try {
       await Clipboard.setStringAsync(code);
       setCodeCopied(true);
-      
+
       // Clear any existing timeout
       if (copyTimeoutRef.current) {
         clearTimeout(copyTimeoutRef.current);
       }
-      
+
       // Reset the icon back to copy after 3 seconds
       copyTimeoutRef.current = setTimeout(() => {
         setCodeCopied(false);
       }, 3000);
-      
+
       if (Platform.OS === 'android') {
         ToastAndroid.show('Queue code copied', ToastAndroid.SHORT);
       } else {
@@ -481,7 +509,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       }
     };
   }, []);
-
 
   const handleGeneratePoster = useCallback(
     async (mode: 'color' | 'bw', forDownload: boolean = true) => {
@@ -506,7 +533,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           detailLines: buildPosterDetails(),
           blackWhiteMode: mode === 'bw',
         });
-        
+
         if (forDownload) {
           const objectUrl = URL.createObjectURL(blob);
           const link = doc.createElement('a');
@@ -528,7 +555,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           const objectUrl = URL.createObjectURL(blob);
           setPosterImageUrl(objectUrl);
         }
-        
+
         return blob;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to generate poster';
@@ -604,12 +631,12 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       link.click();
       doc.body.removeChild(link);
       URL.revokeObjectURL(objectUrl);
-        Alert.alert('Poster ready', 'Check your downloads folder for the PNG file.');
-        trackHostAction('qr_saved', {
-          platform: Platform.OS,
-          method: 'poster_download',
-          mode: posterBlackWhite ? 'bw' : 'color',
-        });
+      Alert.alert('Poster ready', 'Check your downloads folder for the PNG file.');
+      trackHostAction('qr_saved', {
+        platform: Platform.OS,
+        method: 'poster_download',
+        mode: posterBlackWhite ? 'bw' : 'color',
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to download poster';
       Alert.alert('Download failed', message);
@@ -770,9 +797,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         {typeof capacity === 'number' ? (
           <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
         ) : null}
-        {scheduleLine ? (
-          <Text style={styles.headerLine}>{scheduleLine}</Text>
-        ) : null}
+        {scheduleLine ? <Text style={styles.headerLine}>{scheduleLine}</Text> : null}
         <View style={styles.headerCodeRow}>
           <Text style={styles.headerLine}>Queue code:</Text>
           <Text style={styles.headerCodeValue}>{code}</Text>
@@ -816,9 +841,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
                 )}
               </Pressable>
             ) : null}
-            <Pressable
-              style={styles.posterButtonSecondary}
-              onPress={handleShare}>
+            <Pressable style={styles.posterButtonSecondary} onPress={handleShare}>
               <Feather name="share-2" size={18} color="#111" />
               <Text style={styles.posterButtonSecondaryText}>Share</Text>
             </Pressable>
@@ -842,7 +865,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         ) : null}
         <View style={styles.queueActionsRow}>
           <Pressable
-            style={[styles.primaryButton, disabledAdvance ? styles.primaryButtonDisabled : undefined]}
+            style={[
+              styles.primaryButton,
+              disabledAdvance ? styles.primaryButtonDisabled : undefined,
+            ]}
             disabled={disabledAdvance}
             onPress={advanceCurrent}>
             {actionLoading ? (
@@ -955,9 +981,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
                   </View>
                   <Text style={styles.posterModalCheckboxLabel}>Black & White</Text>
                 </Pressable>
-                <Pressable
-                  style={styles.posterModalDownloadButton}
-                  onPress={handleDownloadPoster}>
+                <Pressable style={styles.posterModalDownloadButton} onPress={handleDownloadPoster}>
                   <Feather name="download" size={18} color="#fff" />
                   <Text style={styles.posterModalDownloadText}>Download</Text>
                 </Pressable>
@@ -979,15 +1003,14 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         <View style={styles.webModalCard}>
           <Text style={styles.webModalTitle}>Connection Error</Text>
           <Text style={styles.webModalMessage}>
-            {connectionError || 'Unable to connect to the server. Please check your internet connection and try again.'}
+            {connectionError ||
+              'Unable to connect to the server. Please check your internet connection and try again.'}
           </Text>
           <View style={styles.webModalActions}>
             <Pressable style={styles.webModalCancelButton} onPress={handleGoHome}>
               <Text style={styles.webModalCancelText}>Go Home</Text>
             </Pressable>
-            <Pressable
-              style={styles.webModalConfirmButton}
-              onPress={handleRetryConnection}>
+            <Pressable style={styles.webModalConfirmButton} onPress={handleRetryConnection}>
               <Text style={styles.webModalConfirmText}>Retry</Text>
             </Pressable>
           </View>

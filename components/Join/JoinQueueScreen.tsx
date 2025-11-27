@@ -17,10 +17,20 @@ import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'ex
 import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
-import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL, type PushSubscriptionParams } from '../../lib/backend';
+import {
+  buildGuestConnectUrl,
+  joinQueue,
+  leaveQueue,
+  getVapidPublicKey,
+  savePushSubscription,
+  API_BASE_URL,
+  type PushSubscriptionParams,
+  type JoinQueueError,
+} from '../../lib/backend';
 import { trackEvent } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import { useModal } from '../../contexts/ModalContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -32,6 +42,7 @@ const ANALYTICS_SCREEN = 'join_queue';
 
 export default function JoinQueueScreen({ navigation, route }: Props) {
   const { showModal } = useModal();
+  const { user, login } = useAuth();
   const routeCode =
     route.params?.code && route.params.code.trim().length > 0
       ? route.params.code.trim().toUpperCase().slice(-6)
@@ -99,7 +110,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     // Check if already in this specific queue
     try {
       const joinedQueues = await storage.getJoinedQueues();
-      const alreadyJoined = joinedQueues.find(q => q.code === trimmed);
+      const alreadyJoined = joinedQueues.find((q) => q.code === trimmed);
       if (alreadyJoined) {
         showModal({
           title: 'Already in this queue',
@@ -180,7 +191,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           sessionId: joinResult.sessionId ?? '',
           partyId: joinResult.partyId,
           eventName: joinResult.eventName,
-          joinedAt: Date.now()
+          joinedAt: Date.now(),
         });
       } catch (storageError) {
         console.warn('Failed to store joined queue info', storageError);
@@ -200,10 +211,31 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       });
       return;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error joining queue';
+      const joinError = error as JoinQueueError;
+      const message = joinError.message || 'Unknown error joining queue';
 
-      // Check if it's a Turnstile verification error
-      if (message.includes('Turnstile verification') || message.includes('verification required')) {
+      // Check if queue requires authentication
+      if (joinError.requiresAuth) {
+        showModal({
+          title: 'Login Required',
+          message: 'This queue requires you to sign in before joining.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', onPress: () => {} },
+            {
+              text: 'Sign In',
+              onPress: () => {
+                // Build the return URL to come back to this join screen with the code
+                const returnTo = `/join/${trimmed}`;
+                login('github', { returnTo });
+              },
+            },
+          ],
+        });
+      } else if (
+        message.includes('Turnstile verification') ||
+        message.includes('verification required')
+      ) {
+        // Check if it's a Turnstile verification error
         showModal({
           title: 'Verification Required',
           message: 'Please complete the Cloudflare security check above before joining the queue.',
@@ -212,7 +244,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         // Check storage to navigate to existing queue
         try {
           const joinedQueues = await storage.getJoinedQueues();
-          const alreadyJoined = joinedQueues.find(q => q.code === trimmed);
+          const alreadyJoined = joinedQueues.find((q) => q.code === trimmed);
           if (alreadyJoined) {
             showModal({
               title: 'Already in this queue',
@@ -350,53 +382,59 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   const snapshotUrl = useMemo(() => {
     if (!joinedCode || !partyId) return null;
     const wsUrl = buildGuestConnectUrl(joinedCode, partyId);
-    return wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+    return wsUrl
+      .replace('/connect', '/snapshot')
+      .replace('wss://', 'https://')
+      .replace('ws://', 'http://');
   }, [joinedCode, partyId]);
 
-  const handleSnapshot = useCallback((data: Record<string, unknown>) => {
-    try {
-      switch (data.type) {
-        case 'position': {
-          const position = Number(data.position);
-          const aheadCount = Number(data.aheadCount);
-          if (!Number.isNaN(position)) {
-            setResultText(
-              aheadCount >= 0
-                ? `You're number ${position} in line. ${aheadCount} ${
-                    aheadCount === 1 ? 'party' : 'parties'
-                  } ahead of you.`
-                : `You're number ${position} in line.`
-            );
+  const handleSnapshot = useCallback(
+    (data: Record<string, unknown>) => {
+      try {
+        switch (data.type) {
+          case 'position': {
+            const position = Number(data.position);
+            const aheadCount = Number(data.aheadCount);
+            if (!Number.isNaN(position)) {
+              setResultText(
+                aheadCount >= 0
+                  ? `You're number ${position} in line. ${aheadCount} ${
+                      aheadCount === 1 ? 'party' : 'parties'
+                    } ahead of you.`
+                  : `You're number ${position} in line.`
+              );
+            }
+            break;
           }
-          break;
+          case 'called': {
+            setResultText("You're being served now! Please head to the host.");
+            break;
+          }
+          case 'removed': {
+            const reason = data.reason;
+            const reasonMessages: Record<string, string> = {
+              served: 'All set! You have been marked as served.',
+              no_show: "We couldn't reach you, so you were removed from the queue.",
+              kicked: 'The host removed you from the queue.',
+              closed: 'Queue closed. Thanks for your patience!',
+            };
+            const message = reasonMessages[reason as string] ?? 'You have left the queue.';
+            resetSession(message);
+            break;
+          }
+          case 'closed': {
+            resetSession('Queue closed by the host. Thanks for waiting with us!');
+            break;
+          }
+          default:
+            break;
         }
-        case 'called': {
-          setResultText("You're being served now! Please head to the host.");
-          break;
-        }
-        case 'removed': {
-          const reason = data.reason;
-          const reasonMessages: Record<string, string> = {
-            served: 'All set! You have been marked as served.',
-            no_show: "We couldn't reach you, so you were removed from the queue.",
-            kicked: 'The host removed you from the queue.',
-            closed: 'Queue closed. Thanks for your patience!',
-          };
-          const message = reasonMessages[reason as string] ?? 'You have left the queue.';
-          resetSession(message);
-          break;
-        }
-        case 'closed': {
-          resetSession('Queue closed by the host. Thanks for waiting with us!');
-          break;
-        }
-        default:
-          break;
+      } catch (err) {
+        console.warn('Failed to parse guest snapshot payload', err);
       }
-    } catch (err) {
-      console.warn('Failed to parse guest snapshot payload', err);
-    }
-  }, [resetSession]);
+    },
+    [resetSession]
+  );
 
   const poll = useCallback(async () => {
     if (!snapshotUrl) {
@@ -477,7 +515,11 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   }, [joinedCode, partyId, clearReconnect, stopPolling, startPolling]);
 
   const enablePush = useCallback(
-    async (options?: { sessionOverride?: string | null; partyOverride?: string | null; silent?: boolean }) => {
+    async (options?: {
+      sessionOverride?: string | null;
+      partyOverride?: string | null;
+      silent?: boolean;
+    }) => {
       if (Platform.OS !== 'web') {
         return;
       }
@@ -534,7 +576,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         }
         const b64ToU8 = (b64: string) => {
           try {
-            return Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+            return Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
+              c.charCodeAt(0)
+            );
           } catch (error) {
             throw new Error('Invalid VAPID public key format');
           }
@@ -702,8 +746,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     return (
       <Pressable
         style={[styles.pushButton, pushReady && styles.pushButtonActive]}
-        onPress={() => void enablePush()}
-      >
+        onPress={() => void enablePush()}>
         <Text style={[styles.pushIcon, pushReady && styles.pushIconActive]}>
           {pushReady ? '🔔✓' : '🔔'}
         </Text>
@@ -847,7 +890,8 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             ) : null}
 
             {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
-              <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
+              <Text
+                style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
                 Complete the verification above to join
               </Text>
             ) : null}
@@ -871,12 +915,21 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
                 <Pressable
                   style={[
                     styles.button,
-                    (loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken))
+                    loading ||
+                    (isWeb &&
+                      Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) &&
+                      !turnstileToken)
                       ? styles.buttonDisabled
-                      : undefined
+                      : undefined,
                   ]}
                   onPress={onSubmit}
-                  disabled={loading || inQueue || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}>
+                  disabled={
+                    loading ||
+                    inQueue ||
+                    (isWeb &&
+                      Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) &&
+                      !turnstileToken)
+                  }>
                   {loading ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
@@ -909,7 +962,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             onBarcodeScanned={scannerActive ? handleBarcodeScanned : undefined}
           />
           <View style={styles.scannerControls}>
-            <Text style={styles.scannerHint}>Align the QR code with the frame to fill the key.</Text>
+            <Text style={styles.scannerHint}>
+              Align the QR code with the frame to fill the key.
+            </Text>
             <Pressable style={styles.scannerCloseButton} onPress={handleCloseScanner}>
               <Text style={styles.scannerCloseText}>Close</Text>
             </Pressable>
@@ -926,15 +981,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           <View style={styles.webModalCard}>
             <Text style={styles.webModalTitle}>Connection Error</Text>
             <Text style={styles.webModalMessage}>
-              {connectionError || 'Unable to connect to the server. Please check your internet connection and try again.'}
+              {connectionError ||
+                'Unable to connect to the server. Please check your internet connection and try again.'}
             </Text>
             <View style={styles.webModalActions}>
               <Pressable style={styles.webModalCancelButton} onPress={handleGoHome}>
                 <Text style={styles.webModalCancelText}>Go Home</Text>
               </Pressable>
-              <Pressable
-                style={styles.webModalConfirmButton}
-                onPress={handleRetryConnection}>
+              <Pressable style={styles.webModalConfirmButton} onPress={handleRetryConnection}>
                 <Text style={styles.webModalConfirmText}>Retry</Text>
               </Pressable>
             </View>

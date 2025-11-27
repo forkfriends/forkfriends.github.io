@@ -5,6 +5,7 @@ export type RootStackParamList = {
   JoinQueueScreen: { id: string; code?: string } | undefined;
   PrivacyPolicyScreen: undefined;
   AdminDashboardScreen: undefined;
+  HostDashboardScreen: undefined;
   HostQueueScreen: {
     code: string;
     sessionId: string;
@@ -17,6 +18,7 @@ export type RootStackParamList = {
     contactInfo?: string | null;
     openTime?: string | null;
     closeTime?: string | null;
+    requiresAuth?: boolean;
   };
   GuestQueueScreen: {
     code: string;

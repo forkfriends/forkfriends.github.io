@@ -245,6 +245,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    marginBottom: 8,
+    paddingVertical: 8,
+  },
+  switchLabelContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
+  switchDescription: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
 });
 
 export default styles;

@@ -114,4 +114,28 @@ export default StyleSheet.create({
     color: '#555',
     textDecorationLine: 'underline',
   },
+  myQueuesButton: {
+    marginTop: 20,
+    width: '100%',
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#1f6feb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  myQueuesButtonText: {
+    color: '#1f6feb',
+    fontSize: 14,
+    fontWeight: '600',
+  },
 });

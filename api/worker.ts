@@ -18,7 +18,7 @@ import {
   exchangeGoogleCodeForToken,
   fetchGitHubUser,
   fetchGoogleUser,
-  findOrCreateUser,
+  findOrCreateUserFromGitHub,
   findOrCreateUserFromGoogle,
   getSessionFromRequest,
   isAdmin,
@@ -51,11 +51,24 @@ export interface Env {
   // Google OAuth
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  // Admin emails (comma-separated)
+  ADMIN_EMAILS?: string;
 }
 
 const DEFAULT_APP_BASE_URL = 'https://forkfriends.github.io/';
 const MS_PER_MINUTE = 60 * 1000;
 const FALLBACK_CALL_WINDOW_MINUTES = 2;
+
+/**
+ * Safely build a redirect URL, validating the URI to prevent open redirect attacks.
+ * Falls back to DEFAULT_APP_BASE_URL if the URI is invalid or not provided.
+ */
+function safeRedirectUrl(uri: string | null | undefined): URL {
+  if (uri && isValidRedirectUri(uri)) {
+    return new URL(uri);
+  }
+  return new URL(DEFAULT_APP_BASE_URL);
+}
 
 const ROUTE =
   /^\/api\/queue(?:\/(create|[A-Za-z0-9]{6})(?:\/(join|declare-nearby|leave|advance|kick|close|connect|snapshot))?)?$/;
@@ -111,8 +124,10 @@ export default {
         return applyCors(jsonError('GitHub OAuth not configured', 500), corsOrigin);
       }
 
-      const platform = (url.searchParams.get('platform') as 'web' | 'native') || 'web';
+      const rawPlatform = url.searchParams.get('platform');
+      const platform: 'web' | 'native' = rawPlatform === 'native' ? 'native' : 'web';
       const redirectUri = url.searchParams.get('redirect_uri') || null;
+      const returnTo = url.searchParams.get('return_to') || null;
 
       // Validate redirect_uri if provided (for native apps)
       if (redirectUri && !isValidRedirectUri(redirectUri)) {
@@ -120,8 +135,8 @@ export default {
       }
 
       try {
-        // Create and store OAuth state
-        const state = await createOAuthState(env.DB, platform, redirectUri);
+        // Create and store OAuth state (now includes return_to)
+        const state = await createOAuthState(env.DB, platform, redirectUri, 'github', returnTo);
 
         // Build callback URL (always points to our worker)
         const callbackUrl = new URL('/api/auth/github/callback', url.origin).toString();
@@ -219,11 +234,19 @@ export default {
           const exchangeToken = await createExchangeToken(env.DB, user.id);
           successUrl.searchParams.set('exchange_token', exchangeToken);
           successUrl.searchParams.set('auth', 'success');
+          // Pass through return_to for post-auth navigation
+          if (stateData.returnTo) {
+            successUrl.searchParams.set('return_to', stateData.returnTo);
+          }
           return Response.redirect(successUrl.toString(), 302);
         }
 
         // For same-origin web: set HttpOnly cookie and redirect
         successUrl.searchParams.set('auth', 'success');
+        // Pass through return_to for post-auth navigation
+        if (stateData.returnTo) {
+          successUrl.searchParams.set('return_to', stateData.returnTo);
+        }
 
         const sessionCookieMaxAge = 30 * 24 * 60 * 60; // 30 days
         const headers = new Headers({
@@ -251,21 +274,19 @@ export default {
         return applyCors(jsonError('Google OAuth not configured', 500), corsOrigin);
       }
 
-      const platform = (url.searchParams.get('platform') as 'web' | 'native') || 'web';
+      const rawPlatform = url.searchParams.get('platform');
+      const platform: 'web' | 'native' = rawPlatform === 'native' ? 'native' : 'web';
       const redirectUri = url.searchParams.get('redirect_uri') || null;
-
-      console.log('[Google OAuth Start] platform:', platform, 'redirectUri:', redirectUri);
+      const returnTo = url.searchParams.get('return_to') || null;
 
       // Validate redirect_uri if provided (for native apps)
       if (redirectUri && !isValidRedirectUri(redirectUri)) {
-        console.log('[Google OAuth Start] Invalid redirect_uri:', redirectUri);
         return applyCors(jsonError('Invalid redirect_uri', 400), corsOrigin);
       }
 
       try {
-        // Create and store OAuth state with provider
-        const state = await createOAuthState(env.DB, platform, redirectUri, 'google');
-        console.log('[Google OAuth Start] Created state, redirectUri stored:', redirectUri);
+        // Create and store OAuth state with provider (now includes return_to)
+        const state = await createOAuthState(env.DB, platform, redirectUri, 'google', returnTo);
 
         // Build callback URL (always points to our worker)
         const callbackUrl = new URL('/api/auth/google/callback', url.origin).toString();
@@ -302,12 +323,6 @@ export default {
           .bind(state)
           .first<{ redirect_uri: string | null }>();
         earlyRedirectUri = stateRow?.redirect_uri || null;
-        console.log(
-          '[Google OAuth Callback] Early state lookup - stateRow:',
-          stateRow,
-          'earlyRedirectUri:',
-          earlyRedirectUri
-        );
       }
 
       // Handle OAuth error from Google
@@ -318,7 +333,7 @@ export default {
         if (state) {
           await env.DB.prepare('DELETE FROM oauth_states WHERE state = ?1').bind(state).run();
         }
-        const failureUrl = buildRedirectUrl(earlyRedirectUri);
+        const failureUrl = safeRedirectUrl(earlyRedirectUri);
         failureUrl.searchParams.set('auth', 'error');
         failureUrl.searchParams.set('error', errorDesc);
         return Response.redirect(failureUrl.toString(), 302);
@@ -331,9 +346,8 @@ export default {
       try {
         // Validate state (this consumes it)
         const stateData = await validateOAuthState(env.DB, state);
-        console.log('[Google OAuth Callback] Validated state:', stateData);
         if (!stateData) {
-          const failureUrl = buildRedirectUrl(earlyRedirectUri);
+          const failureUrl = safeRedirectUrl(earlyRedirectUri);
           failureUrl.searchParams.set('auth', 'error');
           failureUrl.searchParams.set('error', 'Invalid or expired state');
           return Response.redirect(failureUrl.toString(), 302);
@@ -388,11 +402,19 @@ export default {
           const exchangeToken = await createExchangeToken(env.DB, user.id);
           successUrl.searchParams.set('exchange_token', exchangeToken);
           successUrl.searchParams.set('auth', 'success');
+          // Pass through return_to for post-auth navigation
+          if (stateData.returnTo) {
+            successUrl.searchParams.set('return_to', stateData.returnTo);
+          }
           return Response.redirect(successUrl.toString(), 302);
         }
 
         // For same-origin web: set HttpOnly cookie and redirect
         successUrl.searchParams.set('auth', 'success');
+        // Pass through return_to for post-auth navigation
+        if (stateData.returnTo) {
+          successUrl.searchParams.set('return_to', stateData.returnTo);
+        }
 
         const sessionCookieMaxAge = 30 * 24 * 60 * 60; // 30 days
         const headers = new Headers({
@@ -403,7 +425,7 @@ export default {
         return new Response(null, { status: 302, headers });
       } catch (e) {
         console.error('Google OAuth callback error:', e);
-        const failureUrl = buildRedirectUrl(earlyRedirectUri);
+        const failureUrl = safeRedirectUrl(earlyRedirectUri);
         failureUrl.searchParams.set('auth', 'error');
         failureUrl.searchParams.set('error', 'Authentication failed');
         return Response.redirect(failureUrl.toString(), 302);
@@ -445,7 +467,7 @@ export default {
                     google_email: user.google_email,
                     google_avatar_url: user.google_avatar_url,
                     email: user.email,
-                    is_admin: isAdmin(user),
+                    is_admin: isAdmin(user, env.ADMIN_EMAILS),
                   }
                 : null,
             }),
@@ -495,7 +517,7 @@ export default {
                 google_email: user.google_email,
                 google_avatar_url: user.google_avatar_url,
                 email: user.email,
-                is_admin: isAdmin(user),
+                is_admin: isAdmin(user, env.ADMIN_EMAILS),
               },
             }),
             { status: 200, headers: { 'content-type': 'application/json' } }
@@ -542,6 +564,226 @@ export default {
         new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }),
         corsOrigin
       );
+    }
+
+    // ============================================
+    // Host Dashboard / Queue Management Routes
+    // ============================================
+
+    // GET /api/queues/mine - List all queues owned by the authenticated user
+    if (request.method === 'GET' && url.pathname === '/api/queues/mine') {
+      try {
+        const sessionId = getSessionFromRequest(request);
+        if (!sessionId) {
+          return applyCors(jsonError('Authentication required', 401), corsOrigin);
+        }
+
+        const user = await validateSession(env.DB, sessionId);
+        if (!user) {
+          return applyCors(jsonError('Invalid session', 401), corsOrigin);
+        }
+
+        // Get all queues owned by this user with stats
+        const result = await env.DB.prepare(
+          `SELECT 
+            s.id,
+            s.short_code,
+            s.event_name,
+            s.status,
+            s.created_at,
+            s.max_guests,
+            s.location,
+            s.contact_info,
+            s.open_time,
+            s.close_time,
+            s.requires_auth,
+            (SELECT COUNT(*) FROM parties p WHERE p.session_id = s.id AND p.status IN ('waiting', 'called')) as active_count,
+            (SELECT COUNT(*) FROM parties p WHERE p.session_id = s.id AND p.status = 'served') as served_count,
+            (SELECT COUNT(*) FROM parties p WHERE p.session_id = s.id AND p.status = 'left') as left_count,
+            (SELECT COUNT(*) FROM parties p WHERE p.session_id = s.id AND p.status = 'no_show') as no_show_count,
+            (SELECT AVG((p.completed_at - p.joined_at)) FROM parties p 
+              WHERE p.session_id = s.id AND p.status = 'served' AND p.completed_at IS NOT NULL) as avg_wait_seconds
+          FROM sessions s
+          WHERE s.owner_id = ?1
+          ORDER BY s.created_at DESC`
+        )
+          .bind(user.id)
+          .all<{
+            id: string;
+            short_code: string;
+            event_name: string | null;
+            status: string;
+            created_at: number;
+            max_guests: number | null;
+            location: string | null;
+            contact_info: string | null;
+            open_time: string | null;
+            close_time: string | null;
+            requires_auth: number;
+            active_count: number;
+            served_count: number;
+            left_count: number;
+            no_show_count: number;
+            avg_wait_seconds: number | null;
+          }>();
+
+        const queues = (result.results || []).map((q) => ({
+          id: q.id,
+          shortCode: q.short_code,
+          eventName: q.event_name,
+          status: q.status,
+          createdAt: q.created_at,
+          maxGuests: q.max_guests,
+          location: q.location,
+          contactInfo: q.contact_info,
+          openTime: q.open_time,
+          closeTime: q.close_time,
+          requiresAuth: q.requires_auth === 1,
+          stats: {
+            activeCount: q.active_count,
+            servedCount: q.served_count,
+            leftCount: q.left_count,
+            noShowCount: q.no_show_count,
+            avgWaitSeconds: q.avg_wait_seconds,
+          },
+        }));
+
+        return applyCors(
+          new Response(JSON.stringify({ queues }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+          corsOrigin
+        );
+      } catch (e) {
+        console.error('queues/mine error:', e);
+        return applyCors(jsonError('Failed to fetch queues', 500), corsOrigin);
+      }
+    }
+
+    // GET /api/queues/:id/stats - Get detailed stats for a single queue (owner only)
+    const queueStatsMatch = /^\/api\/queues\/([A-Za-z0-9-]+)\/stats$/.exec(url.pathname);
+    if (request.method === 'GET' && queueStatsMatch) {
+      try {
+        const queueId = queueStatsMatch[1];
+
+        const sessionId = getSessionFromRequest(request);
+        if (!sessionId) {
+          return applyCors(jsonError('Authentication required', 401), corsOrigin);
+        }
+
+        const user = await validateSession(env.DB, sessionId);
+        if (!user) {
+          return applyCors(jsonError('Invalid session', 401), corsOrigin);
+        }
+
+        // Verify ownership
+        const queue = await env.DB.prepare(
+          'SELECT id, owner_id, event_name, status, short_code FROM sessions WHERE id = ?1'
+        )
+          .bind(queueId)
+          .first<{
+            id: string;
+            owner_id: string | null;
+            event_name: string | null;
+            status: string;
+            short_code: string;
+          }>();
+
+        if (!queue) {
+          return applyCors(jsonError('Queue not found', 404), corsOrigin);
+        }
+
+        if (queue.owner_id !== user.id) {
+          return applyCors(jsonError('Not authorized to view this queue', 403), corsOrigin);
+        }
+
+        // Get detailed stats
+        const partyStats = await env.DB.prepare(
+          `SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN status IN ('waiting', 'called') THEN 1 ELSE 0 END) as active,
+            SUM(CASE WHEN status = 'served' THEN 1 ELSE 0 END) as served,
+            SUM(CASE WHEN status = 'left' THEN 1 ELSE 0 END) as left,
+            SUM(CASE WHEN status = 'no_show' THEN 1 ELSE 0 END) as no_show,
+            SUM(CASE WHEN status = 'kicked' THEN 1 ELSE 0 END) as kicked
+          FROM parties WHERE session_id = ?1`
+        )
+          .bind(queueId)
+          .first<{
+            total: number;
+            active: number;
+            served: number;
+            left: number;
+            no_show: number;
+            kicked: number;
+          }>();
+
+        const waitTimeStats = await env.DB.prepare(
+          `SELECT 
+            AVG((completed_at - joined_at)) as avg_wait_seconds,
+            MIN((completed_at - joined_at)) as min_wait_seconds,
+            MAX((completed_at - joined_at)) as max_wait_seconds
+          FROM parties 
+          WHERE session_id = ?1 AND status = 'served' AND completed_at IS NOT NULL`
+        )
+          .bind(queueId)
+          .first<{
+            avg_wait_seconds: number | null;
+            min_wait_seconds: number | null;
+            max_wait_seconds: number | null;
+          }>();
+
+        // Get hourly activity for the last 24 hours
+        const hourlyActivity = await env.DB.prepare(
+          `SELECT 
+            strftime('%H', datetime(joined_at, 'unixepoch')) as hour,
+            COUNT(*) as count
+          FROM parties 
+          WHERE session_id = ?1 AND joined_at > strftime('%s', 'now') - 86400
+          GROUP BY hour
+          ORDER BY hour`
+        )
+          .bind(queueId)
+          .all<{ hour: string; count: number }>();
+
+        return applyCors(
+          new Response(
+            JSON.stringify({
+              queue: {
+                id: queue.id,
+                eventName: queue.event_name,
+                status: queue.status,
+                shortCode: queue.short_code,
+              },
+              stats: {
+                parties: partyStats || {
+                  total: 0,
+                  active: 0,
+                  served: 0,
+                  left: 0,
+                  no_show: 0,
+                  kicked: 0,
+                },
+                waitTime: waitTimeStats || {
+                  avg_wait_seconds: null,
+                  min_wait_seconds: null,
+                  max_wait_seconds: null,
+                },
+                hourlyActivity: hourlyActivity.results || [],
+              },
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }
+          ),
+          corsOrigin
+        );
+      } catch (e) {
+        console.error('queue stats error:', e);
+        return applyCors(jsonError('Failed to fetch queue stats', 500), corsOrigin);
+      }
     }
 
     // Push API: subscribe
@@ -597,7 +839,7 @@ export default {
     // Analytics dashboard data
     if (request.method === 'GET' && url.pathname === '/api/analytics') {
       // Require admin authentication
-      const { error: adminError } = await requireAdmin(env.DB, request);
+      const { error: adminError } = await requireAdmin(env.DB, request, env.ADMIN_EMAILS);
       if (adminError) {
         return applyCors(adminError, corsOrigin);
       }
@@ -905,7 +1147,7 @@ export default {
     // Analytics CSV export endpoint
     if (request.method === 'GET' && url.pathname === '/api/analytics/export') {
       // Require admin authentication
-      const { error: adminError } = await requireAdmin(env.DB, request);
+      const { error: adminError } = await requireAdmin(env.DB, request, env.ADMIN_EMAILS);
       if (adminError) {
         return applyCors(adminError, corsOrigin);
       }
@@ -1070,7 +1312,7 @@ export default {
     // Abandonment Risk Model endpoint
     if (request.method === 'GET' && url.pathname === '/api/analytics/abandonment-model') {
       // Require admin authentication
-      const { error: adminError } = await requireAdmin(env.DB, request);
+      const { error: adminError } = await requireAdmin(env.DB, request, env.ADMIN_EMAILS);
       if (adminError) {
         return applyCors(adminError, corsOrigin);
       }
@@ -1159,7 +1401,7 @@ export default {
     // Throughput Forecasting endpoint
     if (request.method === 'GET' && url.pathname === '/api/analytics/throughput') {
       // Require admin authentication
-      const { error: adminError } = await requireAdmin(env.DB, request);
+      const { error: adminError } = await requireAdmin(env.DB, request, env.ADMIN_EMAILS);
       if (adminError) {
         return applyCors(adminError, corsOrigin);
       }
@@ -1425,7 +1667,10 @@ export default {
   },
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    // Scheduled cleanup will arrive in later checkpoints.
+    // Clean up expired OAuth states, exchange tokens, and sessions
+    const { cleanupExpiredAuth } = await import('./utils/oauth');
+    await cleanupExpiredAuth(env.DB);
+    console.log('[Scheduled] Cleaned up expired auth tokens');
   },
 
   async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -1761,6 +2006,28 @@ async function handleCreate(
     return jsonError('maxGuests must be between 1 and 100', 400);
   }
 
+  // Check if requiresAuth is requested
+  const rawRequiresAuth = (payload as any).requiresAuth;
+  const requiresAuth = rawRequiresAuth === true || rawRequiresAuth === 'true';
+
+  // Check for authenticated user (optional - queue creation works without auth)
+  let ownerId: string | null = null;
+  const sessionId_auth = getSessionFromRequest(request);
+  if (sessionId_auth) {
+    const user = await validateSession(env.DB, sessionId_auth);
+    if (user) {
+      ownerId = user.id;
+    }
+  }
+
+  // Only authenticated users can create queues that require guest authentication
+  if (requiresAuth && !ownerId) {
+    return jsonError(
+      'You must be logged in to create a queue that requires guest authentication',
+      400
+    );
+  }
+
   // Turnstile verification
   const turnstileToken = (payload as any).turnstileToken;
   const remoteIp = request.headers.get('CF-Connecting-IP') ?? undefined;
@@ -1805,7 +2072,7 @@ async function handleCreate(
   const shortCode = await generateUniqueCode(env);
 
   const insertResult = await env.DB.prepare(
-    "INSERT INTO sessions (id, short_code, status, event_name, max_guests, location, contact_info, open_time, close_time) VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?7, ?8)"
+    "INSERT INTO sessions (id, short_code, status, event_name, max_guests, location, contact_info, open_time, close_time, owner_id, requires_auth) VALUES (?1, ?2, 'active', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
   )
     .bind(
       sessionId,
@@ -1815,7 +2082,9 @@ async function handleCreate(
       normalizedLocation,
       normalizedContactInfo,
       normalizedOpenTime,
-      normalizedCloseTime
+      normalizedCloseTime,
+      ownerId,
+      requiresAuth ? 1 : 0
     )
     .run();
 
@@ -1851,6 +2120,8 @@ async function handleCreate(
     contactInfo: normalizedContactInfo,
     openTime: normalizedOpenTime,
     closeTime: normalizedCloseTime,
+    requiresAuth,
+    ownerId,
   });
 
   return new Response(body, { status: 200, headers });
@@ -1957,6 +2228,45 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
     return jsonError('size must be a positive integer', 400);
   }
 
+  // Check if this queue requires authentication
+  const sessionRow = await env.DB.prepare('SELECT requires_auth FROM sessions WHERE id = ?1')
+    .bind(sessionId)
+    .first<{ requires_auth: number | null }>();
+
+  const requiresAuth = sessionRow?.requires_auth === 1;
+
+  // Check for authenticated user
+  let userId: string | null = null;
+  const authSessionId = getSessionFromRequest(request);
+  if (authSessionId) {
+    const user = await validateSession(env.DB, authSessionId);
+    if (user) {
+      userId = user.id;
+    }
+  }
+
+  // If queue requires auth, ensure user is logged in
+  if (requiresAuth && !userId) {
+    return jsonError('This queue requires you to log in before joining', 401, {
+      requiresAuth: true,
+    });
+  }
+
+  // If user is authenticated, check for duplicate joins (one user = one spot in queue)
+  if (userId) {
+    const existingParty = await env.DB.prepare(
+      "SELECT id FROM parties WHERE session_id = ?1 AND user_id = ?2 AND status IN ('waiting', 'called') LIMIT 1"
+    )
+      .bind(sessionId, userId)
+      .first<{ id: string }>();
+
+    if (existingParty) {
+      return jsonError('You are already in this queue', 409, {
+        existingPartyId: existingParty.id,
+      });
+    }
+  }
+
   const remoteIp = request.headers.get('CF-Connecting-IP') ?? undefined;
   const turnstileEnabled =
     env.TURNSTILE_BYPASS !== 'true' &&
@@ -1996,6 +2306,7 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
   const body = {
     name,
     size,
+    userId, // Pass user_id to QueueDO if authenticated
   };
   return proxyJsonToQueueDO(env, sessionId, 'join', body, request.headers);
 }

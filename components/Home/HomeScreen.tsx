@@ -5,11 +5,13 @@ import type { StoredQueue, StoredJoinedQueue } from '../../utils/storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
+import { useAuth } from '../../contexts/AuthContext';
 import styles from './HomeScreen.Styles';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;
 
 export default function HomeScreen({ navigation }: Props) {
+  const { user } = useAuth();
   const handledPrefillRef = useRef(false);
   const initialLoadDoneRef = useRef(false);
   const [activeQueues, setActiveQueues] = React.useState<StoredQueue[]>([]);
@@ -143,6 +145,14 @@ export default function HomeScreen({ navigation }: Props) {
             <Text style={styles.buttonText}>Join Queue</Text>
           </Pressable>
         </View>
+
+        {user && (
+          <Pressable
+            style={styles.myQueuesButton}
+            onPress={() => navigation.navigate('HostDashboardScreen')}>
+            <Text style={styles.myQueuesButtonText}>My Queues</Text>
+          </Pressable>
+        )}
 
         {joinedQueues.length > 0 && (
           <View style={styles.sectionContainer}>

@@ -28,6 +28,7 @@ import HostQueueScreen from './components/Host/HostQueueScreen';
 import GuestQueueScreen from './components/Guest/GuestQueueScreen';
 import PrivacyPolicyScreen from './components/PrivacyPolicy/PrivacyPolicyScreen';
 import AdminDashboardScreen from './components/Admin/AdminDashboardScreen';
+import HostDashboardScreen from './components/HostDashboard/HostDashboardScreen';
 import LoginScreen from './components/Login/LoginScreen';
 import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
@@ -35,6 +36,24 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import React, { useState } from 'react';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+// Linking configuration for deep links and web URLs
+const linking = {
+  prefixes: ['queueup://', 'https://queueup.app', 'http://localhost:8081'],
+  config: {
+    screens: {
+      HomeScreen: '',
+      LoginScreen: 'login',
+      MakeQueueScreen: 'make',
+      JoinQueueScreen: 'join/:code?',
+      GuestQueueScreen: 'queue/:code',
+      HostQueueScreen: 'host/:code',
+      PrivacyPolicyScreen: 'privacy',
+      AdminDashboardScreen: 'admin',
+      HostDashboardScreen: 'my-queues',
+    },
+  },
+};
 
 const headerStyles = StyleSheet.create({
   headerRight: {
@@ -141,6 +160,7 @@ const getScreenTitle = (screenName: string): string => {
     GuestQueueScreen: 'Guest Queue',
     PrivacyPolicyScreen: 'Privacy Policy',
     AdminDashboardScreen: 'Analytics',
+    HostDashboardScreen: 'My Queues',
   };
   return screenTitles[screenName] || screenName;
 };
@@ -261,6 +281,7 @@ function AppNavigator() {
   return (
     <NavigationContainer
       ref={navigationRef}
+      linking={linking}
       onStateChange={handleStateChange}
       onReady={handleReady}>
       <StatusBar style="auto" />
@@ -270,19 +291,33 @@ function AppNavigator() {
           headerRight: () => <HeaderRight />,
           headerBackTitleVisible: false,
           headerLeft: () => {
+            // HomeScreen is the root - no back button
             if (route.name === 'HomeScreen') {
               return null;
             }
-            if (!navigation.canGoBack()) {
-              return null;
-            }
+
+            // Determine the back navigation target
+            // HostQueueScreen should go back to HostDashboardScreen (My Queues)
+            // Other screens go back to HomeScreen or use native back if available
+            const handleBack = () => {
+              if (navigation.canGoBack()) {
+                navigation.goBack();
+              } else if (route.name === 'HostQueueScreen') {
+                // Host queue screens should go back to My Queues
+                navigation.navigate('HostDashboardScreen');
+              } else {
+                // All other screens go back to Home
+                navigation.navigate('HomeScreen');
+              }
+            };
+
             return (
               <Pressable
                 style={headerStyles.backButton}
                 accessibilityRole="button"
                 accessibilityLabel="Go back"
                 hitSlop={12}
-                onPress={() => navigation.goBack()}>
+                onPress={handleBack}>
                 <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
               </Pressable>
             );
@@ -306,6 +341,11 @@ function AppNavigator() {
         <Stack.Screen
           name="AdminDashboardScreen"
           component={AdminDashboardScreen}
+          options={{ title: '' }}
+        />
+        <Stack.Screen
+          name="HostDashboardScreen"
+          component={HostDashboardScreen}
           options={{ title: '' }}
         />
       </Stack.Navigator>

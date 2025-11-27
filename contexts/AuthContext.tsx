@@ -32,8 +32,12 @@ interface AuthState {
   isAdmin: boolean;
 }
 
+interface LoginOptions {
+  returnTo?: string;
+}
+
 interface AuthContextType extends AuthState {
-  login: (provider?: 'github' | 'google') => Promise<void>;
+  login: (provider?: 'github' | 'google', options?: LoginOptions) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -174,6 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const parsed = new URL(url);
       const token = parsed.searchParams.get('exchange_token');
+      const returnTo = parsed.searchParams.get('return_to');
 
       if (token) {
         const result = await exchangeToken(token);
@@ -186,6 +191,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isAuthenticated: true,
             isAdmin: result.user.is_admin === true,
           });
+
+          // TODO: Handle native navigation to returnTo
+          // This would require a navigation ref to be passed in or exposed
+          // For now, native apps will return to the default screen
+          if (returnTo) {
+            console.log('Native auth complete, should navigate to:', returnTo);
+          }
         }
       }
     } catch (error) {
@@ -200,11 +212,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const params = new URLSearchParams(window.location.search);
     const authStatus = params.get('auth');
     const exchangeTokenParam = params.get('exchange_token');
+    const returnTo = params.get('return_to');
 
     if (authStatus === 'success') {
-      // Clear the URL params first
-      const newUrl = window.location.pathname + window.location.hash;
-      window.history.replaceState({}, '', newUrl || '/');
+      // Determine where to navigate after auth
+      // returnTo is the in-app path (e.g., '/admin', '/join/ABC123')
+      const targetPath = returnTo || '/';
+
+      // Clear the URL params and navigate to returnTo
+      window.history.replaceState({}, '', targetPath);
 
       // Check if we have an exchange token (cross-origin flow like localhost)
       if (exchangeTokenParam) {
@@ -244,9 +260,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const errorMsg = params.get('error') || 'Authentication failed';
       console.error('Auth error:', errorMsg);
 
-      // Clear the URL params
-      const newUrl = window.location.pathname + window.location.hash;
-      window.history.replaceState({}, '', newUrl || '/');
+      // Clear the URL params, navigate back to returnTo or home
+      const targetPath = returnTo || '/';
+      window.history.replaceState({}, '', targetPath);
 
       setState({
         user: null,
@@ -318,27 +334,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [handleDeepLink]);
 
   // Login function
-  const login = useCallback(async (provider: 'github' | 'google' = 'github') => {
-    const isNative = Platform.OS !== 'web';
-    const platform = isNative ? 'native' : 'web';
+  const login = useCallback(
+    async (provider: 'github' | 'google' = 'github', options?: LoginOptions) => {
+      const isNative = Platform.OS !== 'web';
+      const platform = isNative ? 'native' : 'web';
 
-    // Build the auth URL based on provider
-    const authUrl = new URL(`${API_BASE_URL}/api/auth/${provider}`);
-    authUrl.searchParams.set('platform', platform);
+      // Build the auth URL based on provider
+      const authUrl = new URL(`${API_BASE_URL}/api/auth/${provider}`);
+      authUrl.searchParams.set('platform', platform);
 
-    if (isNative) {
-      // For native apps, set the deep link redirect URI
-      authUrl.searchParams.set('redirect_uri', 'queueup://auth/callback');
-      // Open in system browser
-      await Linking.openURL(authUrl.toString());
-    } else {
-      // For web, pass the current origin so we redirect back here after auth
-      // This allows localhost dev and production to both work
-      const currentOrigin = window.location.origin;
-      authUrl.searchParams.set('redirect_uri', currentOrigin);
-      window.location.href = authUrl.toString();
-    }
-  }, []);
+      // Determine returnTo path
+      let returnTo = options?.returnTo;
+      if (!returnTo && Platform.OS === 'web') {
+        // Default: return to current path (preserving the user's location)
+        returnTo = window.location.pathname + window.location.search;
+      }
+
+      if (returnTo) {
+        authUrl.searchParams.set('return_to', returnTo);
+      }
+
+      if (isNative) {
+        // For native apps, set the deep link redirect URI
+        authUrl.searchParams.set('redirect_uri', 'queueup://auth/callback');
+        // Open in system browser
+        await Linking.openURL(authUrl.toString());
+      } else {
+        // For web, pass the current origin so we redirect back here after auth
+        // This allows localhost dev and production to both work
+        const currentOrigin = window.location.origin;
+        authUrl.searchParams.set('redirect_uri', currentOrigin);
+        window.location.href = authUrl.toString();
+      }
+    },
+    []
+  );
 
   // Logout function
   const logout = useCallback(async () => {

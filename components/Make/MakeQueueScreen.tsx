@@ -10,6 +10,7 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Switch,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import DateTimePicker, {
@@ -24,6 +25,7 @@ import type { RootStackParamList } from '../../types/navigation';
 import styles from './MakeQueueScreen.Styles';
 import { createQueue } from '../../lib/backend';
 import { trackEvent } from '../../utils/analytics';
+import { useAuth } from '../../contexts/AuthContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MakeQueueScreen'>;
 
@@ -79,6 +81,7 @@ function serializeTime(date: Date): string {
 }
 
 export default function MakeQueueScreen({ navigation }: Props) {
+  const { user } = useAuth();
   const [eventName, setEventName] = useState('');
   const [location, setLocation] = useState('');
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
@@ -93,6 +96,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const [openTime, setOpenTime] = useState(() => createTime(9));
   const [closeTime, setCloseTime] = useState(() => createTime(17));
   const [contact, setContact] = useState('');
+  const [requiresAuth, setRequiresAuth] = useState(false);
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const turnstileRef = useRef<any>(null);
@@ -454,6 +458,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
         openTime: openTimeValue,
         closeTime: closeTimeValue,
         turnstileToken: turnstileToken ?? undefined,
+        requiresAuth: user ? requiresAuth : undefined,
       });
       if (created.hostAuthToken) {
         try {
@@ -465,14 +470,14 @@ export default function MakeQueueScreen({ navigation }: Props) {
             wsUrl: created.wsUrl,
             hostAuthToken: created.hostAuthToken,
             joinUrl: created.joinUrl,
-          eventName: created.eventName,
-          maxGuests: created.maxGuests,
-          location: created.location ?? (trimmedLocation || undefined),
-          contactInfo: created.contactInfo ?? (trimmedContact || undefined),
-          openTime: created.openTime ?? openTimeValue,
-          closeTime: created.closeTime ?? closeTimeValue,
-          createdAt: Date.now()
-        });
+            eventName: created.eventName,
+            maxGuests: created.maxGuests,
+            location: created.location ?? (trimmedLocation || undefined),
+            contactInfo: created.contactInfo ?? (trimmedContact || undefined),
+            openTime: created.openTime ?? openTimeValue,
+            closeTime: created.closeTime ?? closeTimeValue,
+            createdAt: Date.now(),
+          });
         } catch (error) {
           console.warn('Failed to store queue details:', error);
         }
@@ -505,6 +510,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
         contactInfo: created.contactInfo ?? (trimmedContact || undefined),
         openTime: created.openTime ?? openTimeValue,
         closeTime: created.closeTime ?? closeTimeValue,
+        requiresAuth: user ? requiresAuth : false,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error creating queue';
@@ -708,6 +714,24 @@ export default function MakeQueueScreen({ navigation }: Props) {
               textAlignVertical="top"
             />
 
+            {/* Require Guest Login (only shown when host is logged in) */}
+            {user ? (
+              <View style={styles.switchRow}>
+                <View style={styles.switchLabelContainer}>
+                  <Text style={styles.label}>Require Guest Login</Text>
+                  <Text style={styles.switchDescription}>
+                    Guests must sign in before joining this queue
+                  </Text>
+                </View>
+                <Switch
+                  value={requiresAuth}
+                  onValueChange={setRequiresAuth}
+                  trackColor={{ false: '#d0d7de', true: '#1f6feb' }}
+                  thumbColor={requiresAuth ? '#fff' : '#f4f3f4'}
+                />
+              </View>
+            ) : null}
+
             {/* Turnstile Widget */}
             {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
               <View style={{ marginVertical: 16, alignItems: 'center' }}>
@@ -748,13 +772,15 @@ export default function MakeQueueScreen({ navigation }: Props) {
             <Pressable
               style={[
                 styles.button,
-                loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)
+                loading ||
+                (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
                   ? styles.buttonDisabled
                   : undefined,
               ]}
               onPress={onSubmit}
               disabled={
-                loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)
+                loading ||
+                (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
               }>
               {loading ? (
                 <ActivityIndicator color="#fff" />
