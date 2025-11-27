@@ -1,4 +1,4 @@
-import { StyleSheet, ViewStyle, TextStyle } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 // Breakpoints
 const DESKTOP_BREAKPOINT = 1024;
