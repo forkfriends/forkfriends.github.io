@@ -206,6 +206,7 @@ export const storage = {
             ...sq,
             wsUrl: local.wsUrl || sq.wsUrl,
             hostAuthToken: local.hostAuthToken || sq.hostAuthToken,
+            joinUrl: local.joinUrl || sq.joinUrl,
           };
         }
         return sq;

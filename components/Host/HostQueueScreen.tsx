@@ -151,6 +151,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           // Build wsUrl from code if not present in storage (server-synced queues don't have wsUrl)
           const wsUrl = activeQueue.wsUrl || buildHostWsUrlFromCode(code);
 
+          // Build joinUrl from code if not present in storage
+          const joinUrl =
+            activeQueue.joinUrl ||
+            (typeof window !== 'undefined' ? `${window.location.origin}/queue/${code}` : undefined);
+
           // Set hostToken directly here to avoid race condition with isRecoveringParams
           if (hostAuthToken) {
             setHostToken(hostAuthToken);
@@ -159,7 +164,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           setRecoveredParams({
             sessionId: activeQueue.sessionId,
             wsUrl,
-            joinUrl: activeQueue.joinUrl,
+            joinUrl,
             hostAuthToken,
             eventName: activeQueue.eventName,
             maxGuests: activeQueue.maxGuests,
