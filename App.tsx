@@ -312,66 +312,163 @@ function AppNavigator() {
       <StatusBar style="auto" />
       <Stack.Navigator
         initialRouteName="HomeScreen"
-        screenOptions={({ navigation, route }) => ({
+        screenOptions={{
+          headerShown: true,
+          headerTitle: '',
+          headerBackVisible: false,
           headerRight: () => <HeaderRight />,
-          headerBackTitleVisible: false,
-          headerLeft: () => {
-            // HomeScreen is the root - no back button
-            if (route.name === 'HomeScreen') {
-              return null;
-            }
-
-            // Determine the back navigation target
-            // HostQueueScreen should go back to HostDashboardScreen (My Queues)
-            // Other screens go back to HomeScreen or use native back if available
-            const handleBack = () => {
-              if (navigation.canGoBack()) {
-                navigation.goBack();
-              } else if (route.name === 'HostQueueScreen') {
-                // Host queue screens should go back to My Queues
-                navigation.navigate('HostDashboardScreen');
-              } else {
-                // All other screens go back to Home
-                navigation.navigate('HomeScreen');
-              }
-            };
-
-            return (
+          headerLeft: () => null,
+        }}>
+        <Stack.Screen
+          name="HomeScreen"
+          component={HomeScreen}
+          options={{ headerLeft: () => null }}
+        />
+        <Stack.Screen
+          name="LoginScreen"
+          component={LoginScreen}
+          options={({ navigation }) => ({
+            headerLeft: () => (
               <Pressable
                 style={headerStyles.backButton}
                 accessibilityRole="button"
                 accessibilityLabel="Go back"
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                onPress={handleBack}>
+                onPress={() =>
+                  navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeScreen')
+                }>
                 <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
               </Pressable>
-            );
-          },
-        })}>
-        <Stack.Screen name="HomeScreen" component={HomeScreen} options={{ title: '' }} />
-        <Stack.Screen name="LoginScreen" component={LoginScreen} options={{ title: '' }} />
-        <Stack.Screen name="MakeQueueScreen" component={MakeQueueScreen} options={{ title: '' }} />
-        <Stack.Screen name="JoinQueueScreen" component={JoinQueueScreen} options={{ title: '' }} />
+            ),
+          })}
+        />
+        <Stack.Screen
+          name="MakeQueueScreen"
+          component={MakeQueueScreen}
+          options={({ navigation }) => ({
+            headerLeft: () => (
+              <Pressable
+                style={headerStyles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                onPress={() =>
+                  navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeScreen')
+                }>
+                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+              </Pressable>
+            ),
+          })}
+        />
+        <Stack.Screen
+          name="JoinQueueScreen"
+          component={JoinQueueScreen}
+          options={({ navigation }) => ({
+            headerLeft: () => (
+              <Pressable
+                style={headerStyles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                onPress={() =>
+                  navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeScreen')
+                }>
+                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+              </Pressable>
+            ),
+          })}
+        />
         <Stack.Screen
           name="GuestQueueScreen"
           component={GuestQueueScreen}
-          options={{ title: '' }}
+          options={({ navigation }) => ({
+            headerLeft: () => (
+              <Pressable
+                style={headerStyles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                onPress={() =>
+                  navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeScreen')
+                }>
+                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+              </Pressable>
+            ),
+          })}
         />
-        <Stack.Screen name="HostQueueScreen" component={HostQueueScreen} options={{ title: '' }} />
+        <Stack.Screen
+          name="HostQueueScreen"
+          component={HostQueueScreen}
+          options={({ navigation }) => ({
+            headerLeft: () => (
+              <Pressable
+                style={headerStyles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('HostDashboardScreen')
+                }>
+                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+              </Pressable>
+            ),
+          })}
+        />
         <Stack.Screen
           name="PrivacyPolicyScreen"
           component={PrivacyPolicyScreen}
-          options={{ title: '' }}
+          options={({ navigation }) => ({
+            headerLeft: () => (
+              <Pressable
+                style={headerStyles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                onPress={() =>
+                  navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeScreen')
+                }>
+                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+              </Pressable>
+            ),
+          })}
         />
         <Stack.Screen
           name="AdminDashboardScreen"
           component={AdminDashboardScreen}
-          options={{ title: '' }}
+          options={({ navigation }) => ({
+            headerLeft: () => (
+              <Pressable
+                style={headerStyles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                onPress={() =>
+                  navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeScreen')
+                }>
+                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+              </Pressable>
+            ),
+          })}
         />
         <Stack.Screen
           name="HostDashboardScreen"
           component={HostDashboardScreen}
-          options={{ title: '' }}
+          options={({ navigation }) => ({
+            headerLeft: () => (
+              <Pressable
+                style={headerStyles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                onPress={() =>
+                  navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeScreen')
+                }>
+                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+              </Pressable>
+            ),
+          })}
         />
       </Stack.Navigator>
     </NavigationContainer>
