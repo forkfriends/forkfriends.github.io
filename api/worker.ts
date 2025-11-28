@@ -1764,25 +1764,25 @@ async function handleCreate(
   // Turnstile verification
   const turnstileToken = (payload as any).turnstileToken;
   const remoteIp = request.headers.get('CF-Connecting-IP') ?? undefined;
+  const clientPlatform = request.headers.get('x-client-platform') ?? 'web';
   const turnstileEnabled =
     env.TURNSTILE_BYPASS !== 'true' &&
     env.TURNSTILE_SECRET_KEY &&
     env.TURNSTILE_SECRET_KEY.trim().length > 0;
+  const turnstileRequired = turnstileEnabled && clientPlatform === 'web';
 
   console.log('[handleCreate] Turnstile check:', {
     enabled: turnstileEnabled,
+    required: turnstileRequired,
     bypass: env.TURNSTILE_BYPASS,
     hasSecret: !!env.TURNSTILE_SECRET_KEY,
     hasToken: !!turnstileToken,
+    clientPlatform,
     tokenPreview: turnstileToken?.substring(0, 20),
   });
 
-  if (turnstileEnabled) {
-    if (
-      !turnstileToken ||
-      typeof turnstileToken !== 'string' ||
-      turnstileToken.trim().length === 0
-    ) {
+  if (turnstileRequired) {
+    if (!turnstileToken || typeof turnstileToken !== 'string' || turnstileToken.trim().length === 0) {
       console.warn('[handleCreate] Turnstile token missing!');
       return jsonError('Turnstile verification required', 400, {
         errors: ['missing-input-response'],
@@ -1958,26 +1958,26 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
   }
 
   const remoteIp = request.headers.get('CF-Connecting-IP') ?? undefined;
+  const clientPlatform = request.headers.get('x-client-platform') ?? 'web';
   const turnstileEnabled =
     env.TURNSTILE_BYPASS !== 'true' &&
     env.TURNSTILE_SECRET_KEY &&
     env.TURNSTILE_SECRET_KEY.trim().length > 0;
+  const turnstileRequired = turnstileEnabled && clientPlatform === 'web';
 
   console.log('[handleJoin] Turnstile check:', {
     enabled: turnstileEnabled,
+    required: turnstileRequired,
     bypass: env.TURNSTILE_BYPASS,
     hasSecret: !!env.TURNSTILE_SECRET_KEY,
     hasToken: !!turnstileToken,
+    clientPlatform,
     tokenPreview: turnstileToken?.substring(0, 20),
   });
 
   // If Turnstile is enabled, require a valid token
-  if (turnstileEnabled) {
-    if (
-      !turnstileToken ||
-      typeof turnstileToken !== 'string' ||
-      turnstileToken.trim().length === 0
-    ) {
+  if (turnstileRequired) {
+    if (!turnstileToken || typeof turnstileToken !== 'string' || turnstileToken.trim().length === 0) {
       console.warn('[handleJoin] Turnstile token missing!');
       return jsonError('Turnstile verification required', 400, {
         errors: ['missing-input-response'],

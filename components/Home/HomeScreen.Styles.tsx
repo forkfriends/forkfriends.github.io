@@ -43,7 +43,7 @@ export default StyleSheet.create({
   title: {
     fontSize: 56,
     fontWeight: '700',
-    lineHeight: 40,
+    lineHeight: 56,
   },
   buttonRow: {
     flexDirection: 'row',

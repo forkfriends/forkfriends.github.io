@@ -11,6 +11,9 @@ const apiBaseUrlWithDefault = rawApiBaseUrl ?? DEFAULT_LOCALHOST;
 const apiBaseUrlSanitized = apiBaseUrlWithDefault ? apiBaseUrlWithDefault.replace(/\/$/, '') : '';
 export const API_BASE_URL = apiBaseUrlSanitized ?? '';
 
+const CLIENT_PLATFORM_HEADER = 'x-client-platform';
+const clientPlatformValue = Platform.OS;
+
 export interface CreateQueueResult {
   code: string;
   sessionId: string;
@@ -87,7 +90,10 @@ export async function createQueue({ eventName, maxGuests, turnstileToken, locati
   const response = await fetch(`${API_BASE_URL}/api/queue/create`, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      [CLIENT_PLATFORM_HEADER]: clientPlatformValue,
+    },
     body: JSON.stringify(body),
   });
 
@@ -127,7 +133,10 @@ export async function joinQueue({ code, name, size, turnstileToken }: JoinQueueP
 
   const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/join`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      [CLIENT_PLATFORM_HEADER]: clientPlatformValue,
+    },
     body: JSON.stringify(payload),
   });
 

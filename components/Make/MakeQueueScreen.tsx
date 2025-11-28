@@ -18,12 +18,17 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Turnstile } from '@marsidev/react-turnstile';
 import * as Location from 'expo-location';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './MakeQueueScreen.Styles';
 import { createQueue } from '../../lib/backend';
 import { trackEvent } from '../../utils/analytics';
+
+const TurnstileComponent =
+  Platform.OS === 'web'
+    ? // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('@marsidev/react-turnstile').Turnstile
+    : () => null;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MakeQueueScreen'>;
 
@@ -711,7 +716,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
             {/* Turnstile Widget */}
             {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
               <View style={{ marginVertical: 16, alignItems: 'center' }}>
-                <Turnstile
+                <TurnstileComponent
                   ref={turnstileRef}
                   siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
                   onSuccess={(token) => {

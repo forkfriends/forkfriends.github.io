@@ -14,13 +14,26 @@ import Slider from '@react-native-community/slider';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
-import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
-import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL, type PushSubscriptionParams } from '../../lib/backend';
+import {
+  buildGuestConnectUrl,
+  joinQueue,
+  leaveQueue,
+  getVapidPublicKey,
+  savePushSubscription,
+  API_BASE_URL,
+  type PushSubscriptionParams,
+} from '../../lib/backend';
 import { trackEvent } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import { useModal } from '../../contexts/ModalContext';
+
+const TurnstileComponent =
+  Platform.OS === 'web'
+    ? // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('@marsidev/react-turnstile').Turnstile
+    : () => null;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -820,7 +833,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
 
             {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
               <View style={{ marginVertical: 16, alignItems: 'center' }}>
-                <Turnstile
+                <TurnstileComponent
                   ref={turnstileRef}
                   siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
                   onSuccess={(token) => {
