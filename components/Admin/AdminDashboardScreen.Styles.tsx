@@ -643,12 +643,129 @@ const styles = StyleSheet.create({
   },
   areaChartPoint: {
     position: 'absolute',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'transparent',
+    marginLeft: -6,
+    marginBottom: -6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // @ts-ignore - web-only
+    cursor: 'pointer',
+  },
+  areaChartPointDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     backgroundColor: '#3b82f6',
-    marginLeft: -3,
-    marginBottom: -3,
+  },
+  areaChartPointHovered: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginLeft: -8,
+    marginBottom: -8,
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  areaChartPointDotHovered: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#3b82f6',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  chartTooltip: {
+    position: 'absolute',
+    bottom: 20,
+    left: '50%',
+    // @ts-ignore - web-only
+    transform: [{ translateX: '-50%' }],
+    backgroundColor: '#1f2937',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    // @ts-ignore - web-only
+    whiteSpace: 'nowrap',
+    zIndex: 100,
+  },
+  chartTooltipText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  barHovered: {
+    opacity: 0.8,
+    // @ts-ignore - web-only
+    transform: [{ scale: 1.02 }],
+  },
+  barTooltip: {
+    position: 'absolute',
+    top: '50%',
+    right: -10,
+    // @ts-ignore - web-only
+    transform: [{ translateY: '-50%' }, { translateX: '100%' }],
+    backgroundColor: '#1f2937',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    // @ts-ignore - web-only
+    whiteSpace: 'nowrap',
+    zIndex: 100,
+  },
+  barTooltipVertical: {
+    position: 'absolute',
+    bottom: '100%',
+    left: '50%',
+    // @ts-ignore - web-only
+    transform: [{ translateX: '-50%' }],
+    backgroundColor: '#1f2937',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginBottom: 4,
+    // @ts-ignore - web-only
+    whiteSpace: 'nowrap',
+    zIndex: 100,
+  },
+  barTooltipHorizontal: {
+    position: 'absolute',
+    top: -30,
+    left: 90,
+    backgroundColor: '#1f2937',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    // @ts-ignore - web-only
+    whiteSpace: 'nowrap',
+    zIndex: 100,
+  },
+  barTooltipVerticalFixed: {
+    position: 'absolute',
+    top: -30,
+    left: '50%',
+    // @ts-ignore - web-only
+    transform: 'translateX(-50%)',
+    backgroundColor: '#1f2937',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    // @ts-ignore - web-only
+    whiteSpace: 'nowrap',
+    zIndex: 100,
+  },
+  funnelTooltip: {
+    position: 'absolute',
+    top: -32,
+    left: 0,
+    backgroundColor: '#1f2937',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    // @ts-ignore - web-only
+    whiteSpace: 'nowrap',
+    zIndex: 100,
   },
   areaChartXAxis: {
     flexDirection: 'row',
@@ -659,6 +776,73 @@ const styles = StyleSheet.create({
   areaChartXLabel: {
     fontSize: 10,
     color: '#999',
+  },
+  // Insights panel styles
+  insightsCard: {
+    backgroundColor: '#f0f9ff',
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+    marginBottom: 16,
+  },
+  insightsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  insightsIcon: {
+    fontSize: 18,
+  },
+  insightsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1e40af',
+  },
+  insightsList: {
+    gap: 10,
+  },
+  insightItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  insightIconWrapper: {
+    marginTop: 2,
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  insightBullet: {
+    fontSize: 12,
+    color: '#3b82f6',
+    marginTop: 2,
+  },
+  insightText: {
+    fontSize: 13,
+    color: '#1e3a5f',
+    flex: 1,
+    lineHeight: 18,
+  },
+  insightHighlight: {
+    fontWeight: '700',
+    color: '#1e40af',
+  },
+  insightWarning: {
+    backgroundColor: '#fef3c7',
+    borderLeftColor: '#f59e0b',
+  },
+  insightWarningText: {
+    color: '#92400e',
+  },
+  insightSuccess: {
+    backgroundColor: '#d1fae5',
+    borderLeftColor: '#10b981',
+  },
+  insightSuccessText: {
+    color: '#065f46',
   },
 });
 

@@ -201,7 +201,11 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   }, []);
 
   const endSession = useCallback(
-    async (message: string) => {
+    async (
+      message: string,
+      shouldNavigateHome = false,
+      modalInfo?: { title: string; message: string }
+    ) => {
       shouldReconnectRef.current = false;
       clearReconnect();
       stopPolling();
@@ -216,8 +220,14 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       } catch (error) {
         console.warn('Failed to remove joined queue from storage', error);
       }
+      // Navigate home after a delay if requested (e.g., queue closed by host)
+      if (shouldNavigateHome) {
+        setTimeout(() => {
+          navigation.navigate('HomeScreen', modalInfo ? { showModal: modalInfo } : undefined);
+        }, 3000);
+      }
     },
-    [clearReconnect, stopPolling, code]
+    [clearReconnect, stopPolling, code, navigation]
   );
 
   const snapshotUrl = useMemo(() => {
@@ -319,18 +329,26 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             setEstimatedWaitMs(null);
             setCallDeadline(null);
             setCalled(false);
-            endSession(message);
+            // Navigate home if queue was closed
+            const modalInfo =
+              key === 'closed'
+                ? { title: 'Queue Closed', message: 'The queue has been closed by the host.' }
+                : undefined;
+            endSession(message, key === 'closed', modalInfo);
             break;
           }
           case 'closed': {
-            const message = 'Queue closed by the host. Thanks for waiting with us!';
+            const message = 'Queue closed by the host. Redirecting to home...';
             setInfoMessage(message);
             setPosition(null);
             setAheadCount(null);
             setQueueLength(null);
             setEstimatedWaitMs(null);
             setCallDeadline(null);
-            endSession(message);
+            endSession(message, true, {
+              title: 'Queue Closed',
+              message: 'The queue has been closed by the host.',
+            });
             break;
           }
           default:

@@ -184,7 +184,9 @@ export const storage = {
     // Fetch from server
     try {
       const result = await getMyQueues();
-      const serverQueues: StoredQueue[] = result.queues.map((q: MyQueue) => ({
+      // Filter out closed queues - only show active queues
+      const activeServerQueues = result.queues.filter((q: MyQueue) => q.status !== 'closed');
+      const serverQueues: StoredQueue[] = activeServerQueues.map((q: MyQueue) => ({
         code: q.shortCode,
         sessionId: q.id,
         wsUrl: '', // Will be rebuilt when needed

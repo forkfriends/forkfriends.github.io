@@ -14,12 +14,14 @@ type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;
 
 const DESKTOP_BREAKPOINT = 900;
 
-export default function HomeScreen({ navigation }: Props) {
+export default function HomeScreen({ navigation, route }: Props) {
   const { user, isAuthenticated } = useAuth();
+  const { showModal } = useModal();
   const { width } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && width >= DESKTOP_BREAKPOINT;
   const handledPrefillRef = useRef(false);
   const initialLoadDoneRef = useRef(false);
+  const handledShowModalRef = useRef(false);
   const [activeQueues, setActiveQueues] = React.useState<StoredQueue[]>([]);
 
   const [joinedQueues, setJoinedQueues] = React.useState<StoredJoinedQueue[]>([]);
@@ -119,6 +121,18 @@ export default function HomeScreen({ navigation }: Props) {
     const cleanedUrl = `${window.location.origin}${window.location.pathname}${window.location.hash}`;
     window.history.replaceState({}, document.title, cleanedUrl);
   }, [navigation]);
+
+  // Show modal if passed via route params (e.g., after closing a queue)
+  useEffect(() => {
+    const modalParams = route.params?.showModal;
+    if (modalParams && !handledShowModalRef.current) {
+      handledShowModalRef.current = true;
+      showModal({
+        title: modalParams.title,
+        message: modalParams.message,
+      });
+    }
+  }, [route.params?.showModal, showModal]);
 
   const hasQueues = joinedQueues.length > 0 || activeQueues.length > 0;
 
