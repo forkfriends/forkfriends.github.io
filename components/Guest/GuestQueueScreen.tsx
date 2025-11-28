@@ -46,7 +46,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
           onPress={() => navigation.navigate('HomeScreen')}
           accessibilityRole="button"
           accessibilityLabel="Go home"
-          hitSlop={12}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           style={({ pressed }) => ({
             opacity: pressed ? 0.6 : 1,
             padding: 8,

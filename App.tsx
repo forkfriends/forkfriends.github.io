@@ -37,62 +37,65 @@ import React, { useState } from 'react';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-// Linking configuration for deep links and web URLs
-const linking = {
-  prefixes: ['queueup://', 'https://queueup.app', 'http://localhost:8081'],
-  config: {
-    screens: {
-      HomeScreen: '',
-      LoginScreen: 'login',
-      MakeQueueScreen: 'make',
-      JoinQueueScreen: 'join/:code?',
-      // Only use the code in the URL path - sensitive params are passed via
-      // navigation state and recovered from storage on page refresh
-      GuestQueueScreen: {
-        path: 'queue/:code',
-        parse: {
-          code: (code: string) => code,
+// Linking configuration for deep links and web URLs (web only)
+const linking =
+  Platform.OS === 'web'
+    ? {
+        prefixes: ['queueup://', 'https://queueup.app', 'http://localhost:8081'],
+        config: {
+          screens: {
+            HomeScreen: '',
+            LoginScreen: 'login',
+            MakeQueueScreen: 'make',
+            JoinQueueScreen: 'join/:code?',
+            // Only use the code in the URL path - sensitive params are passed via
+            // navigation state and recovered from storage on page refresh
+            GuestQueueScreen: {
+              path: 'queue/:code',
+              parse: {
+                code: (code: string) => code,
+              },
+              stringify: {
+                code: (code: string) => code,
+                // Exclude sensitive params from URL
+                partyId: () => undefined as unknown as string,
+                sessionId: () => undefined as unknown as string,
+                initialPosition: () => undefined as unknown as string,
+                initialAheadCount: () => undefined as unknown as string,
+                initialQueueLength: () => undefined as unknown as string,
+                initialEtaMs: () => undefined as unknown as string,
+                guestName: () => undefined as unknown as string,
+                partySize: () => undefined as unknown as string,
+              },
+            },
+            HostQueueScreen: {
+              path: 'host/:code',
+              parse: {
+                code: (code: string) => code,
+              },
+              stringify: {
+                code: (code: string) => code,
+                // Exclude sensitive params from URL
+                sessionId: () => undefined as unknown as string,
+                wsUrl: () => undefined as unknown as string,
+                hostAuthToken: () => undefined as unknown as string,
+                joinUrl: () => undefined as unknown as string,
+                eventName: () => undefined as unknown as string,
+                maxGuests: () => undefined as unknown as string,
+                location: () => undefined as unknown as string,
+                contactInfo: () => undefined as unknown as string,
+                openTime: () => undefined as unknown as string,
+                closeTime: () => undefined as unknown as string,
+                requiresAuth: () => undefined as unknown as string,
+              },
+            },
+            PrivacyPolicyScreen: 'privacy',
+            AdminDashboardScreen: 'admin',
+            HostDashboardScreen: 'my-queues',
+          },
         },
-        stringify: {
-          code: (code: string) => code,
-          // Exclude sensitive params from URL
-          partyId: () => undefined as unknown as string,
-          sessionId: () => undefined as unknown as string,
-          initialPosition: () => undefined as unknown as string,
-          initialAheadCount: () => undefined as unknown as string,
-          initialQueueLength: () => undefined as unknown as string,
-          initialEtaMs: () => undefined as unknown as string,
-          guestName: () => undefined as unknown as string,
-          partySize: () => undefined as unknown as string,
-        },
-      },
-      HostQueueScreen: {
-        path: 'host/:code',
-        parse: {
-          code: (code: string) => code,
-        },
-        stringify: {
-          code: (code: string) => code,
-          // Exclude sensitive params from URL
-          sessionId: () => undefined as unknown as string,
-          wsUrl: () => undefined as unknown as string,
-          hostAuthToken: () => undefined as unknown as string,
-          joinUrl: () => undefined as unknown as string,
-          eventName: () => undefined as unknown as string,
-          maxGuests: () => undefined as unknown as string,
-          location: () => undefined as unknown as string,
-          contactInfo: () => undefined as unknown as string,
-          openTime: () => undefined as unknown as string,
-          closeTime: () => undefined as unknown as string,
-          requiresAuth: () => undefined as unknown as string,
-        },
-      },
-      PrivacyPolicyScreen: 'privacy',
-      AdminDashboardScreen: 'admin',
-      HostDashboardScreen: 'my-queues',
-    },
-  },
-};
+      }
+    : undefined;
 
 const headerStyles = StyleSheet.create({
   headerRight: {
@@ -229,7 +232,7 @@ function HeaderRight() {
           style={headerStyles.avatarButton}
           accessibilityRole="button"
           accessibilityLabel="Open user menu"
-          hitSlop={8}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           onPress={() => setMenuVisible(true)}>
           {avatarUrl ? (
             <Image
@@ -284,7 +287,7 @@ function HeaderRight() {
         style={headerStyles.loginButton}
         accessibilityRole="button"
         accessibilityLabel="Log in"
-        hitSlop={8}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         onPress={() => navigation.navigate('LoginScreen')}>
         <Text style={headerStyles.loginButtonText}>Login</Text>
       </Pressable>
@@ -295,14 +298,17 @@ function HeaderRight() {
 function AppNavigator() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
 
+  // Only use documentTitle on web
+  const documentTitleConfig =
+    Platform.OS === 'web'
+      ? {
+          formatter: (_options: unknown, route: { name?: string } | undefined) =>
+            `QueueUp - ${getScreenTitle(route?.name ?? 'HomeScreen')}`,
+        }
+      : undefined;
+
   return (
-    <NavigationContainer
-      ref={navigationRef}
-      linking={linking}
-      documentTitle={{
-        formatter: (_options, route) =>
-          `QueueUp - ${getScreenTitle(route?.name ?? 'HomeScreen')}`,
-      }}>
+    <NavigationContainer ref={navigationRef} linking={linking} documentTitle={documentTitleConfig}>
       <StatusBar style="auto" />
       <Stack.Navigator
         initialRouteName="HomeScreen"
@@ -335,7 +341,7 @@ function AppNavigator() {
                 style={headerStyles.backButton}
                 accessibilityRole="button"
                 accessibilityLabel="Go back"
-                hitSlop={12}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 onPress={handleBack}>
                 <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
               </Pressable>
