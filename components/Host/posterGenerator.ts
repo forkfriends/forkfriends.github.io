@@ -3,8 +3,9 @@ const POSTER_HEIGHT = 1920;
 const QR_SIZE = 512;
 const LOGO_PATH =
   typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1')
+  typeof window.location !== 'undefined' &&
+  window.location &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? '/icon-black.svg'
     : '/icon-black.svg';
 const FONT_FAMILY = 'Plus Jakarta Sans, "Helvetica Neue", "Segoe UI", sans-serif';

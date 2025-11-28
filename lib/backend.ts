@@ -51,6 +51,9 @@ const apiBaseUrlWithDefault = rawApiBaseUrl ?? DEFAULT_LOCALHOST;
 const apiBaseUrlSanitized = apiBaseUrlWithDefault ? apiBaseUrlWithDefault.replace(/\/$/, '') : '';
 export const API_BASE_URL = apiBaseUrlSanitized ?? '';
 
+const CLIENT_PLATFORM_HEADER = 'x-client-platform';
+const clientPlatformValue = Platform.OS;
+
 export interface CreateQueueResult {
   code: string;
   sessionId: string;

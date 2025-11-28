@@ -383,6 +383,8 @@ export const storage = {
     if (
       queues.length === 0 &&
       Platform.OS === 'web' &&
+      typeof window !== 'undefined' &&
+      typeof window.localStorage !== 'undefined' &&
       window.localStorage.getItem(JOINED_QUEUES_KEY)
     ) {
       console.warn('Detected potential storage read issue, retrying...');
@@ -527,6 +529,8 @@ export const storage = {
     if (
       queues.length === 0 &&
       Platform.OS === 'web' &&
+      typeof window !== 'undefined' &&
+      typeof window.localStorage !== 'undefined' &&
       window.localStorage.getItem(JOINED_QUEUES_KEY)
     ) {
       console.warn('Detected potential storage read issue, retrying...');

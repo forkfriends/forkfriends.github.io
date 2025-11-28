@@ -15,7 +15,6 @@ import Slider from '@react-native-community/slider';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
-import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
 import {
@@ -33,6 +32,12 @@ import { storage } from '../../utils/storage';
 import { useModal } from '../../contexts/ModalContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { ArrowLeft, Bell, BellRing, Smartphone, Users } from 'lucide-react-native';
+
+const TurnstileComponent =
+  Platform.OS === 'web'
+    ? // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('@marsidev/react-turnstile').Turnstile
+    : () => null;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -886,14 +891,14 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
 
       {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
         <View style={{ marginVertical: 16, alignItems: 'center' }}>
-          <Turnstile
+          <TurnstileComponent
             ref={turnstileRef}
             siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
-            onSuccess={(token) => {
+            onSuccess={(token: string) => {
               console.log('[QueueUp][Turnstile] Token received');
               setTurnstileToken(token);
             }}
-            onError={(error) => {
+            onError={(error: unknown) => {
               console.error('[QueueUp][Turnstile] Error:', error);
               setTurnstileToken(null);
             }}
@@ -901,7 +906,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
               console.warn('[QueueUp][Turnstile] Token expired');
               setTurnstileToken(null);
             }}
-            onWidgetLoad={(widgetId) => {
+            onWidgetLoad={(widgetId: string) => {
               console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
             }}
             options={{
