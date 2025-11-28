@@ -11,6 +11,14 @@ import {
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import {
+  Lightbulb,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  CheckCircle,
+  Info,
+} from 'lucide-react-native';
 import type { RootStackParamList } from '../../types/navigation';
 import { API_BASE_URL } from '../../lib/backend';
 import { useAuth } from '../../contexts/AuthContext';
@@ -154,6 +162,18 @@ export default function AdminDashboardScreen(_props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedDays, setSelectedDays] = useState(7);
   const [refreshing, setRefreshing] = useState(false);
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    day: string;
+    count: number;
+    index: number;
+  } | null>(null);
+  const [hoveredBar, setHoveredBar] = useState<{
+    label: string;
+    value: number;
+    index: number;
+    chartId: string;
+  } | null>(null);
+  const [hoveredFunnel, setHoveredFunnel] = useState<number | null>(null);
 
   const fetchAnalytics = useCallback(async (days: number) => {
     try {
@@ -268,6 +288,17 @@ export default function AdminDashboardScreen(_props: Props) {
     return labels[status] || status;
   };
 
+  const getPlatformLabel = (platform: string): string => {
+    const labels: Record<string, string> = {
+      ios: 'iOS (Native)',
+      android: 'Android (Native)',
+      ios_web: 'iOS (Web)',
+      android_web: 'Android (Web)',
+      web: 'Desktop',
+    };
+    return labels[platform] || platform;
+  };
+
   // Donut chart component
   const renderDonutChart = (
     segments: Array<{ label: string; value: number; color: string }>,
@@ -341,23 +372,33 @@ export default function AdminDashboardScreen(_props: Props) {
 
   // Bar chart with labels
   const renderBarChart = (
-    data: Array<{ label: string; value: number; color?: string }>,
-    options: { height?: number; showValues?: boolean; horizontal?: boolean } = {}
+    chartData: Array<{ label: string; value: number; color?: string }>,
+    options: { height?: number; showValues?: boolean; horizontal?: boolean; chartId?: string } = {}
   ) => {
-    const { height = 200, showValues = true, horizontal = false } = options;
-    const maxValue = Math.max(...data.map((d) => d.value), 1);
+    const { height = 200, showValues = true, horizontal = false, chartId = 'default' } = options;
+    const maxValue = Math.max(...chartData.map((d) => d.value), 1);
 
     if (horizontal) {
       return (
         <View style={styles.horizontalBarChart}>
-          {data.map((item, index) => {
+          {chartData.map((item, index) => {
             const percent = (item.value / maxValue) * 100;
+            const isHovered = hoveredBar?.chartId === chartId && hoveredBar?.index === index;
             return (
-              <View key={item.label} style={styles.horizontalBarRow}>
+              <Pressable
+                key={item.label}
+                style={[
+                  styles.horizontalBarRow,
+                  { position: 'relative', zIndex: isHovered ? 10 : 1 },
+                ]}
+                onHoverIn={() =>
+                  setHoveredBar({ label: item.label, value: item.value, index, chartId })
+                }
+                onHoverOut={() => setHoveredBar(null)}>
                 <Text style={styles.horizontalBarLabel} numberOfLines={1}>
                   {item.label}
                 </Text>
-                <View style={styles.horizontalBarTrack}>
+                <View style={[styles.horizontalBarTrack, { position: 'relative' }]}>
                   <View
                     style={[
                       styles.horizontalBarFill,
@@ -365,13 +406,21 @@ export default function AdminDashboardScreen(_props: Props) {
                         width: `${Math.max(percent, 2)}%`,
                         backgroundColor: item.color || CHART_COLORS.primary,
                       },
+                      isHovered && styles.barHovered,
                     ]}
                   />
                 </View>
                 {showValues && (
                   <Text style={styles.horizontalBarValue}>{formatNumber(item.value)}</Text>
                 )}
-              </View>
+                {isHovered && (
+                  <View style={styles.barTooltipHorizontal}>
+                    <Text style={styles.chartTooltipText}>
+                      {item.label}: {formatNumber(item.value)}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
             );
           })}
         </View>
@@ -381,11 +430,18 @@ export default function AdminDashboardScreen(_props: Props) {
     return (
       <View style={[styles.barChartContainer, { height }]}>
         <View style={styles.barChartBars}>
-          {data.map((item, index) => {
+          {chartData.map((item, index) => {
             const percent = (item.value / maxValue) * 100;
+            const isHovered = hoveredBar?.chartId === chartId && hoveredBar?.index === index;
             return (
-              <View key={item.label} style={styles.barChartColumn}>
-                <View style={styles.barChartBarWrapper}>
+              <Pressable
+                key={item.label}
+                style={[styles.barChartColumn, { zIndex: isHovered ? 10 : 1 }]}
+                onHoverIn={() =>
+                  setHoveredBar({ label: item.label, value: item.value, index, chartId })
+                }
+                onHoverOut={() => setHoveredBar(null)}>
+                <View style={[styles.barChartBarWrapper, { position: 'relative' }]}>
                   {showValues && item.value > 0 && (
                     <Text style={styles.barChartValue}>{formatNumber(item.value)}</Text>
                   )}
@@ -396,13 +452,21 @@ export default function AdminDashboardScreen(_props: Props) {
                         height: `${Math.max(percent, 3)}%`,
                         backgroundColor: item.color || CHART_COLORS.primary,
                       },
+                      isHovered && styles.barHovered,
                     ]}
                   />
+                  {isHovered && (
+                    <View style={styles.barTooltipVerticalFixed}>
+                      <Text style={styles.chartTooltipText}>
+                        {item.label}: {formatNumber(item.value)}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 <Text style={styles.barChartLabel} numberOfLines={1}>
                   {item.label}
                 </Text>
-              </View>
+              </Pressable>
             );
           })}
         </View>
@@ -463,13 +527,7 @@ export default function AdminDashboardScreen(_props: Props) {
               top: 0,
               left: 0,
             }}>
-            <defs>
-              <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor={CHART_COLORS.primary} stopOpacity="0.3" />
-                <stop offset="100%" stopColor={CHART_COLORS.primary} stopOpacity="0.05" />
-              </linearGradient>
-            </defs>
-            <path d={areaPath} fill="url(#areaGradient)" />
+            <path d={areaPath} fill="rgba(59, 130, 246, 0.2)" />
             <path
               d={linePath}
               fill="none"
@@ -479,22 +537,36 @@ export default function AdminDashboardScreen(_props: Props) {
             />
           </svg>
 
-          {/* Data points on hover */}
+          {/* Data points with hover */}
           <View style={styles.areaChartPoints}>
             {days.map((day, index) => {
               const leftPercent = `${(index / (days.length - 1 || 1)) * 100}%` as const;
               const bottomPercent = `${(day.count / maxCount) * 100}%` as const;
+              const isHovered = hoveredPoint?.index === index;
               return (
-                <View
+                <Pressable
                   key={day.day}
+                  onHoverIn={() => setHoveredPoint({ day: day.day, count: day.count, index })}
+                  onHoverOut={() => setHoveredPoint(null)}
                   style={[
                     styles.areaChartPoint,
                     {
                       left: leftPercent as `${number}%`,
                       bottom: bottomPercent as `${number}%`,
                     },
-                  ]}
-                />
+                    isHovered && styles.areaChartPointHovered,
+                  ]}>
+                  <View
+                    style={isHovered ? styles.areaChartPointDotHovered : styles.areaChartPointDot}
+                  />
+                  {isHovered && (
+                    <View style={styles.chartTooltip}>
+                      <Text style={styles.chartTooltipText}>
+                        {day.day.slice(5)}: {formatNumber(day.count)} events
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
               );
             })}
           </View>
@@ -539,6 +611,317 @@ export default function AdminDashboardScreen(_props: Props) {
     </View>
   );
 
+  // Generate insights from the data
+  const generateInsights = (): Array<{
+    text: string;
+    type: 'info' | 'success' | 'warning' | 'trend_up' | 'trend_down';
+    highlight?: string;
+    priority: number; // Higher = more important
+  }> => {
+    if (!data) return [];
+
+    const insights: Array<{
+      text: string;
+      type: 'info' | 'success' | 'warning' | 'trend_up' | 'trend_down';
+      highlight?: string;
+      priority: number;
+    }> = [];
+
+    // Helper to calculate rates safely
+    const safeRate = (num: number, denom: number) => (denom > 0 ? num / denom : 0);
+
+    // === FUNNEL INSIGHTS ===
+    const completed = data.joinFunnel?.join_completed ?? 0;
+    const abandoned = data.joinFunnel?.abandoned ?? 0;
+    const totalFlow = completed + abandoned;
+
+    if (totalFlow >= 5) {
+      const completionRate = Math.round(safeRate(completed, totalFlow) * 100);
+      if (completionRate >= 75) {
+        insights.push({
+          text: `${completionRate}% of guests who start joining complete the flow — signup experience is solid.`,
+          type: 'success',
+          priority: 8,
+        });
+      } else if (completionRate < 60) {
+        insights.push({
+          text: `${100 - completionRate}% abandon the join flow. Consider simplifying the form or adding a progress indicator.`,
+          type: 'warning',
+          priority: 9,
+        });
+      }
+    }
+
+    // === PUSH NOTIFICATIONS ===
+    const pushGranted = data.pushStats?.push_granted ?? 0;
+    const pushDenied = data.pushStats?.push_denied ?? 0;
+    const nudgesSent = data.pushStats?.nudges_sent ?? 0;
+    const nudgesAcked = data.pushStats?.nudges_acked ?? 0;
+    const totalPushResponses = pushGranted + pushDenied;
+
+    // Only show nudge ack rate if we actually sent nudges
+    if (nudgesSent >= 5) {
+      const ackRate = Math.round(safeRate(nudgesAcked, nudgesSent) * 100);
+      if (ackRate >= 60) {
+        insights.push({
+          text: `${ackRate}% of "you're up" notifications are acknowledged — push is effectively bringing guests back.`,
+          type: 'success',
+          priority: 7,
+        });
+      } else if (ackRate < 30) {
+        insights.push({
+          text: `Only ${ackRate}% of push notifications are acknowledged. Guests may be missing them.`,
+          type: 'warning',
+          priority: 6,
+        });
+      }
+    } else if (totalPushResponses >= 10) {
+      // Fall back to opt-in rate if no nudges sent
+      const optInRate = Math.round(safeRate(pushGranted, totalPushResponses) * 100);
+      if (optInRate >= 80) {
+        insights.push({
+          text: `${optInRate}% push notification opt-in — guests want to be notified when it's their turn.`,
+          type: 'success',
+          priority: 6,
+        });
+      } else if (optInRate >= 60) {
+        insights.push({
+          text: `${optInRate}% of guests enable push notifications for queue updates.`,
+          type: 'info',
+          priority: 4,
+        });
+      } else if (optInRate < 40) {
+        insights.push({
+          text: `Low ${optInRate}% push opt-in. Try asking for permission after they join, not before.`,
+          type: 'warning',
+          priority: 5,
+        });
+      }
+    }
+
+    // === TRUST SURVEY ===
+    if (data.trustSurveyStats && data.trustSurveyStats.total_responses >= 3) {
+      const trustRate = Math.round(
+        safeRate(data.trustSurveyStats.trust_yes, data.trustSurveyStats.total_responses) * 100
+      );
+      if (trustRate >= 80) {
+        insights.push({
+          text: `${trustRate}% of guests say the estimated wait time "looks right" — they trust the queue.`,
+          type: 'success',
+          priority: 7,
+        });
+      } else if (trustRate < 50) {
+        insights.push({
+          text: `Only ${trustRate}% trust the wait time estimate. Consider showing how it's calculated.`,
+          type: 'warning',
+          priority: 6,
+        });
+      }
+    }
+
+    // === WAIT TIME DATA QUALITY ===
+    const avgWait = data.waitTimeStats?.avg_wait_ms;
+    const totalServed = data.waitTimeStats?.total_served ?? 0;
+    const totalQueues = data.queueStats?.total_queues ?? 0;
+
+    if (totalQueues > 0 && totalServed === 0) {
+      insights.push({
+        text: `No wait time data recorded — ensure hosts are marking guests as "served" to track this.`,
+        type: 'warning',
+        priority: 8,
+      });
+    } else if (avgWait && totalServed >= 5) {
+      const avgMinutes = Math.round(avgWait / 60000);
+      if (avgMinutes <= 5) {
+        insights.push({
+          text: `Average wait is just ${avgMinutes} minutes — guests are being served quickly.`,
+          type: 'success',
+          priority: 5,
+        });
+      } else if (avgMinutes > 20) {
+        insights.push({
+          text: `${avgMinutes} minute average wait may be causing abandonment. Consider ways to speed up service.`,
+          type: 'warning',
+          priority: 7,
+        });
+      }
+    }
+
+    // === QUEUE PERFORMANCE VARIANCE ===
+    if (data.perQueueStats && data.perQueueStats.length >= 2) {
+      const queuesWithData = data.perQueueStats.filter((q) => q.total_parties >= 5);
+
+      if (queuesWithData.length >= 2) {
+        const rates = queuesWithData.map((q) => ({
+          name: q.event_name || q.short_code,
+          rate: safeRate(q.served_count, q.total_parties),
+          total: q.total_parties,
+        }));
+
+        const best = rates.reduce((a, b) => (a.rate > b.rate ? a : b));
+        const worst = rates.reduce((a, b) => (a.rate < b.rate ? a : b));
+        const bestRate = Math.round(best.rate * 100);
+        const worstRate = Math.round(worst.rate * 100);
+
+        // Only show if there's a meaningful gap
+        if (bestRate - worstRate >= 40 && worstRate < 50) {
+          insights.push({
+            text: `"${best.name}" completes ${bestRate}% vs "${worst.name}" at ${worstRate}%. What's different about these events?`,
+            type: 'info',
+            priority: 6,
+          });
+        }
+      }
+    }
+
+    // === NO-SHOW RATE ===
+    const totalParties = data.partyStats?.reduce((sum, s) => sum + s.count, 0) ?? 0;
+    const noShows = data.partyStats?.find((s) => s.status === 'no_show')?.count ?? 0;
+    if (totalParties >= 15 && noShows >= 3) {
+      const noShowRate = Math.round(safeRate(noShows, totalParties) * 100);
+      if (noShowRate >= 15) {
+        insights.push({
+          text: `${noShowRate}% no-show rate. Try sending a reminder when guests are 2-3 spots away.`,
+          type: 'warning',
+          priority: 7,
+        });
+      } else if (noShowRate <= 5) {
+        insights.push({
+          text: `Low ${noShowRate}% no-show rate — guests are showing up when called.`,
+          type: 'success',
+          priority: 4,
+        });
+      }
+    }
+
+    // === PLATFORM BREAKDOWN ===
+    if (data.platformBreakdown && data.platformBreakdown.length > 0) {
+      const totalByPlatform = data.platformBreakdown.reduce((sum, p) => sum + p.count, 0);
+      const desktop = data.platformBreakdown.find((p) => p.platform === 'web');
+      const desktopCount = desktop?.count ?? 0;
+      const desktopPercent = Math.round(safeRate(desktopCount, totalByPlatform) * 100);
+
+      if (desktopPercent >= 90) {
+        insights.push({
+          text: `${desktopPercent}% of traffic is from desktop — guests may be using kiosks or hosts are testing.`,
+          type: 'info',
+          priority: 3,
+        });
+      } else if (desktopPercent < 20) {
+        const mobilePercent = 100 - desktopPercent;
+        insights.push({
+          text: `${mobilePercent}% of guests join from mobile — the mobile experience is key.`,
+          type: 'info',
+          priority: 4,
+        });
+      }
+    }
+
+    // === ABANDONMENT PATTERNS ===
+    const totalLeft = data.abandonmentStats?.total_left ?? 0;
+    const leftUnder5 = data.abandonmentStats?.left_under_5min ?? 0;
+    const leftOver15 = data.abandonmentStats?.left_over_15min ?? 0;
+
+    if (totalLeft >= 5) {
+      const earlyLeaveRate = Math.round(safeRate(leftUnder5, totalLeft) * 100);
+      const lateLeaveRate = Math.round(safeRate(leftOver15, totalLeft) * 100);
+
+      if (earlyLeaveRate >= 60) {
+        insights.push({
+          text: `${earlyLeaveRate}% leave within 5 minutes — show the ETA immediately so they know what to expect.`,
+          type: 'info',
+          priority: 5,
+        });
+      } else if (lateLeaveRate >= 50) {
+        insights.push({
+          text: `${lateLeaveRate}% abandon after 15+ min of waiting. A "you're almost up" notification could help.`,
+          type: 'warning',
+          priority: 6,
+        });
+      }
+    }
+
+    // === ETA ACCURACY ===
+    if (data.etaAccuracyStats && data.etaAccuracyStats.total_with_eta >= 5) {
+      const within5min = data.etaAccuracyStats.within_5min;
+      const total = data.etaAccuracyStats.total_with_eta;
+      const accuracy = Math.round(safeRate(within5min, total) * 100);
+
+      if (accuracy >= 80) {
+        insights.push({
+          text: `ETA predictions are ${accuracy}% accurate within 5 min — guests can rely on the time shown.`,
+          type: 'success',
+          priority: 6,
+        });
+      } else if (accuracy < 50) {
+        const biasMs = data.etaAccuracyStats.avg_bias_ms ?? 0;
+        if (biasMs > 60000) {
+          insights.push({
+            text: `ETAs are running ${Math.round(biasMs / 60000)} min short on average. Guests wait longer than shown.`,
+            type: 'warning',
+            priority: 7,
+          });
+        } else if (biasMs < -60000) {
+          insights.push({
+            text: `ETAs are ${Math.round(Math.abs(biasMs) / 60000)} min too long. Guests are called sooner than expected.`,
+            type: 'info',
+            priority: 5,
+          });
+        }
+      }
+    }
+
+    // Sort by priority (highest first) and take top 5
+    return insights.sort((a, b) => b.priority - a.priority).slice(0, 5);
+  };
+
+  // Render insights panel
+  const renderInsightsPanel = () => {
+    const insights = generateInsights();
+    if (insights.length === 0) return null;
+
+    const getIcon = (type: string) => {
+      switch (type) {
+        case 'success':
+          return <CheckCircle size={16} color="#065f46" />;
+        case 'warning':
+          return <AlertTriangle size={16} color="#92400e" />;
+        case 'trend_up':
+          return <TrendingUp size={16} color="#065f46" />;
+        case 'trend_down':
+          return <TrendingDown size={16} color="#92400e" />;
+        default:
+          return <Info size={16} color="#1e40af" />;
+      }
+    };
+
+    return (
+      <View style={styles.insightsCard}>
+        <View style={styles.insightsHeader}>
+          <Lightbulb size={20} color="#1e40af" />
+          <Text style={styles.insightsTitle}>Insights (last {selectedDays} days)</Text>
+        </View>
+        <View style={styles.insightsList}>
+          {insights.map((insight, index) => (
+            <View key={index} style={styles.insightItem}>
+              <View style={styles.insightIconWrapper}>{getIcon(insight.type)}</View>
+              <Text
+                style={[
+                  styles.insightText,
+                  (insight.type === 'warning' || insight.type === 'trend_down') &&
+                    styles.insightWarningText,
+                  (insight.type === 'success' || insight.type === 'trend_up') &&
+                    styles.insightSuccessText,
+                ]}>
+                {insight.text}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   // Conversion funnel (enhanced)
   const renderConversionFunnel = () => {
     const scans = data?.joinFunnel?.qr_scanned ?? 0;
@@ -563,9 +946,14 @@ export default function AdminDashboardScreen(_props: Props) {
             index > 0 && steps[index - 1].value > 0
               ? Math.round((step.value / steps[index - 1].value) * 100)
               : 100;
+          const isHovered = hoveredFunnel === index;
 
           return (
-            <View key={step.label} style={styles.funnelStep}>
+            <Pressable
+              key={step.label}
+              style={[styles.funnelStep, { position: 'relative', zIndex: isHovered ? 10 : 1 }]}
+              onHoverIn={() => setHoveredFunnel(index)}
+              onHoverOut={() => setHoveredFunnel(null)}>
               <View style={styles.funnelStepHeader}>
                 <Text style={styles.funnelStepLabel}>{step.label}</Text>
                 <Text style={styles.funnelStepValue}>
@@ -581,10 +969,19 @@ export default function AdminDashboardScreen(_props: Props) {
                       width: `${Math.max(percent, 2)}%`,
                       backgroundColor: step.color,
                     },
+                    isHovered && styles.barHovered,
                   ]}
                 />
               </View>
-            </View>
+              {isHovered && (
+                <View style={styles.funnelTooltip}>
+                  <Text style={styles.chartTooltipText}>
+                    {step.label}: {formatNumber(step.value)}
+                    {index > 0 ? ` (${rate}% of previous)` : ''}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
           );
         })}
       </View>
@@ -747,6 +1144,9 @@ export default function AdminDashboardScreen(_props: Props) {
             />
           </View>
 
+          {/* Insights Panel */}
+          {renderInsightsPanel()}
+
           {/* Main Grid */}
           <View style={responsiveStyles.mainGrid}>
             {/* Left Column - 2/3 width */}
@@ -797,7 +1197,7 @@ export default function AdminDashboardScreen(_props: Props) {
                         bucket.total > 0 ? Math.round((bucket.served / bucket.total) * 100) : 0,
                       color: CHART_COLORS.success,
                     })),
-                    { height: 160 }
+                    { height: 160, chartId: 'completion-by-wait' }
                   )}
                 </View>
               )}
@@ -891,7 +1291,7 @@ export default function AdminDashboardScreen(_props: Props) {
                       color: CHART_COLORS.gray,
                     },
                   ],
-                  { horizontal: true }
+                  { horizontal: true, chartId: 'host-actions' }
                 )}
               </View>
 
@@ -931,12 +1331,15 @@ export default function AdminDashboardScreen(_props: Props) {
                   <Text style={responsiveStyles.cardTitle}>Platforms</Text>
                   {renderDonutChart(
                     data.platformBreakdown.map((p, i) => ({
-                      label:
-                        p.platform === 'ios' ? 'iOS' : p.platform === 'android' ? 'Android' : 'Web',
+                      label: getPlatformLabel(p.platform),
                       value: p.count,
-                      color: [CHART_COLORS.primary, CHART_COLORS.success, CHART_COLORS.purple][
-                        i % 3
-                      ],
+                      color: [
+                        CHART_COLORS.primary,
+                        CHART_COLORS.success,
+                        CHART_COLORS.purple,
+                        CHART_COLORS.warning,
+                        CHART_COLORS.pink,
+                      ][i % 5],
                     })),
                     100
                   )}
@@ -1066,7 +1469,7 @@ export default function AdminDashboardScreen(_props: Props) {
                       color: CHART_COLORS.danger,
                     },
                   ],
-                  { horizontal: true }
+                  { horizontal: true, chartId: 'abandonment' }
                 )}
                 <View style={responsiveStyles.abandonmentNote}>
                   <Text style={responsiveStyles.noteText}>
@@ -1123,6 +1526,9 @@ export default function AdminDashboardScreen(_props: Props) {
 
         {data && (
           <>
+            {/* Insights Panel */}
+            {renderInsightsPanel()}
+
             {/* Export Buttons */}
             <View style={styles.exportSection}>
               <Text style={styles.exportTitle}>Export Data</Text>
@@ -1520,22 +1926,14 @@ export default function AdminDashboardScreen(_props: Props) {
                     <View key={platform.platform} style={styles.platformItem}>
                       <View style={styles.platformIcon}>
                         <Text style={{ fontSize: 12 }}>
-                          {platform.platform === 'ios'
+                          {platform.platform === 'ios' || platform.platform === 'ios_web'
                             ? 'iOS'
-                            : platform.platform === 'android'
+                            : platform.platform === 'android' || platform.platform === 'android_web'
                               ? 'And'
                               : 'Web'}
                         </Text>
                       </View>
-                      <Text style={styles.platformName}>
-                        {platform.platform === 'ios'
-                          ? 'iOS'
-                          : platform.platform === 'android'
-                            ? 'Android'
-                            : platform.platform === 'web'
-                              ? 'Web'
-                              : platform.platform}
-                      </Text>
+                      <Text style={styles.platformName}>{getPlatformLabel(platform.platform)}</Text>
                       <Text style={styles.platformCount}>{formatNumber(platform.count)}</Text>
                     </View>
                   ))}

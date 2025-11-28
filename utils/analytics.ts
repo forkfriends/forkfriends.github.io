@@ -144,7 +144,44 @@ export async function setAnalyticsVariant(variant: string | null): Promise<void>
   }
 }
 
-export async function trackEvent(event: AnalyticsEvent, options?: TrackEventOptions): Promise<void> {
+/**
+ * Detects detailed platform info for analytics.
+ * For native apps: returns 'ios' or 'android'
+ * For web: returns 'ios_web', 'android_web', or 'web' (desktop)
+ */
+function getDetailedPlatform(): string {
+  const os = Platform.OS;
+
+  // Native apps - return as-is
+  if (os === 'ios' || os === 'android') {
+    return os;
+  }
+
+  // Web - detect mobile browser vs desktop
+  if (os === 'web' && typeof navigator !== 'undefined') {
+    const ua = navigator.userAgent || '';
+
+    // Check for iOS devices (iPhone, iPad, iPod)
+    if (/iPhone|iPad|iPod/i.test(ua)) {
+      return 'ios_web';
+    }
+
+    // Check for Android devices
+    if (/Android/i.test(ua)) {
+      return 'android_web';
+    }
+
+    // Desktop or other
+    return 'web';
+  }
+
+  return os;
+}
+
+export async function trackEvent(
+  event: AnalyticsEvent,
+  options?: TrackEventOptions
+): Promise<void> {
   if (!API_BASE_URL) {
     return;
   }
@@ -153,7 +190,7 @@ export async function trackEvent(event: AnalyticsEvent, options?: TrackEventOpti
     const [anonId, variant] = await Promise.all([resolveAnonId(), resolveVariant()]);
 
     const meta: Record<string, unknown> = {
-      platform: Platform.OS,
+      platform: getDetailedPlatform(),
       ...(options?.queueCode ? { queueCode: options.queueCode } : {}),
       ...(options?.props ?? {}),
     };
