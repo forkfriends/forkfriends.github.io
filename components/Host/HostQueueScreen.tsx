@@ -539,6 +539,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     }
     return null;
   }, [joinUrl, code]);
+  // QR code URL includes src=qr param for tracking scans vs manual entry
+  const qrCodeLink = useMemo(() => {
+    if (!shareableLink) return null;
+    const url = new URL(shareableLink);
+    url.searchParams.set('src', 'qr');
+    return url.toString();
+  }, [shareableLink]);
   const buildPosterDetails = useCallback(() => {
     const lines: string[] = [];
     if (displayEventName) {
@@ -694,7 +701,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       try {
         const blob = await generatePosterImage({
           slug: code,
-          joinUrl: shareableLink ?? undefined,
+          joinUrl: qrCodeLink ?? undefined,
           detailLines: buildPosterDetails(),
           blackWhiteMode: mode === 'bw',
         });
@@ -731,7 +738,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setPosterGenerating(false);
       }
     },
-    [buildPosterDetails, canGeneratePoster, code, posterModeLoading, shareableLink, trackHostAction]
+    [buildPosterDetails, canGeneratePoster, code, posterModeLoading, qrCodeLink, trackHostAction]
   );
 
   const handleShare = useCallback(async () => {

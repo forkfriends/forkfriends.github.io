@@ -93,6 +93,30 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     setKey((current) => (current === normalized ? current : normalized));
   }, [route.params?.code, inQueue]);
 
+  // Track QR code scans when src=qr parameter is present in URL
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const src = params.get('src');
+      if (src === 'qr' && routeCode) {
+        void trackEvent('qr_scanned', {
+          queueCode: routeCode,
+          props: { screen: ANALYTICS_SCREEN, method: 'camera_scan' },
+        });
+        // Clean up URL to remove src param (optional, prevents duplicate tracking on refresh)
+        params.delete('src');
+        const newSearch = params.toString();
+        const newUrl = `${window.location.pathname}${newSearch ? `?${newSearch}` : ''}`;
+        window.history.replaceState({}, '', newUrl);
+      }
+    } catch {
+      // Ignore URL parsing errors
+    }
+  }, [routeCode]);
+
   const onSubmit = async () => {
     if (loading) return;
     if (inQueue) {

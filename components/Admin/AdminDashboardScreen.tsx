@@ -89,6 +89,11 @@ interface AnalyticsData {
     left: number;
     no_show: number;
   }>;
+  trustSurveyStats: {
+    total_responses: number;
+    trust_yes: number;
+    trust_no: number;
+  };
 }
 
 const PERIOD_OPTIONS = [
@@ -1002,6 +1007,44 @@ export default function AdminDashboardScreen(_props: Props) {
                 </View>
               )}
 
+              {/* Trust Survey */}
+              {data.trustSurveyStats && data.trustSurveyStats.total_responses > 0 && (
+                <View style={responsiveStyles.card}>
+                  <Text style={responsiveStyles.cardTitle}>Trust Survey</Text>
+                  <View style={responsiveStyles.miniStats}>
+                    <View style={responsiveStyles.miniStatItem}>
+                      <Text style={responsiveStyles.miniStatValue}>
+                        {data.trustSurveyStats.total_responses > 0
+                          ? `${Math.round((data.trustSurveyStats.trust_yes / data.trustSurveyStats.total_responses) * 100)}%`
+                          : '-'}
+                      </Text>
+                      <Text style={responsiveStyles.miniStatLabel}>Said Accurate</Text>
+                    </View>
+                    <View style={responsiveStyles.miniStatItem}>
+                      <Text style={responsiveStyles.miniStatValue}>
+                        {formatNumber(data.trustSurveyStats.total_responses)}
+                      </Text>
+                      <Text style={responsiveStyles.miniStatLabel}>Responses</Text>
+                    </View>
+                  </View>
+                  {renderDonutChart(
+                    [
+                      {
+                        label: 'Looks good',
+                        value: data.trustSurveyStats.trust_yes,
+                        color: CHART_COLORS.success,
+                      },
+                      {
+                        label: 'Seems off',
+                        value: data.trustSurveyStats.trust_no,
+                        color: CHART_COLORS.danger,
+                      },
+                    ],
+                    100
+                  )}
+                </View>
+              )}
+
               {/* Abandonment */}
               <View style={responsiveStyles.card}>
                 <Text style={responsiveStyles.cardTitle}>Abandonment</Text>
@@ -1394,6 +1437,43 @@ export default function AdminDashboardScreen(_props: Props) {
                           : 'Estimates are accurate on average'}
                     </Text>
                   )}
+                </View>
+              </View>
+            )}
+
+            {/* Trust Survey */}
+            {data.trustSurveyStats && data.trustSurveyStats.total_responses > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Trust Survey</Text>
+                <View style={styles.card}>
+                  <View style={styles.statsGrid}>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>
+                        {data.trustSurveyStats.total_responses > 0
+                          ? `${Math.round((data.trustSurveyStats.trust_yes / data.trustSurveyStats.total_responses) * 100)}%`
+                          : '-'}
+                      </Text>
+                      <Text style={styles.statLabel}>Said Accurate</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>
+                        {formatNumber(data.trustSurveyStats.trust_yes)}
+                      </Text>
+                      <Text style={styles.statLabel}>Looks Good</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>
+                        {formatNumber(data.trustSurveyStats.trust_no)}
+                      </Text>
+                      <Text style={styles.statLabel}>Seems Off</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>
+                        {formatNumber(data.trustSurveyStats.total_responses)}
+                      </Text>
+                      <Text style={styles.statLabel}>Total</Text>
+                    </View>
+                  </View>
                 </View>
               </View>
             )}

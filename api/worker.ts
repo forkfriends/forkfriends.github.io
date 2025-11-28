@@ -1273,6 +1273,22 @@ export default {
             within_5min: number;
           }>();
 
+        // Get trust survey stats
+        const trustSurveyResult = await env.DB.prepare(
+          `SELECT 
+            COUNT(*) as total_responses,
+            SUM(CASE WHEN json_extract(details, '$.trust') = 'yes' THEN 1 ELSE 0 END) as trust_yes,
+            SUM(CASE WHEN json_extract(details, '$.trust') = 'no' THEN 1 ELSE 0 END) as trust_no
+          FROM events 
+          WHERE ts > ?1 AND type = 'trust_survey_submitted'`
+        )
+          .bind(since)
+          .first<{
+            total_responses: number;
+            trust_yes: number;
+            trust_no: number;
+          }>();
+
         // Get completion rate by wait time bucket
         const completionByWaitResult = await env.DB.prepare(
           `SELECT 
@@ -1357,6 +1373,11 @@ export default {
             within_5min: 0,
           },
           completionByWait: completionByWaitResult.results || [],
+          trustSurveyStats: trustSurveyResult || {
+            total_responses: 0,
+            trust_yes: 0,
+            trust_no: 0,
+          },
         };
 
         return applyCors(
