@@ -33,7 +33,10 @@ import LoginScreen from './components/Login/LoginScreen';
 import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AdProvider, useAd } from './contexts/AdContext';
 import React, { useState } from 'react';
+import AdBanner from './components/Ads/AdBanner';
+import AdPopup from './components/Ads/AdPopup';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -294,6 +297,7 @@ function HeaderRight() {
 
 function AppNavigator() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const { showPopup, closePopup } = useAd();
 
   return (
     <NavigationContainer
@@ -304,70 +308,74 @@ function AppNavigator() {
           `QueueUp - ${getScreenTitle(route?.name ?? 'HomeScreen')}`,
       }}>
       <StatusBar style="auto" />
-      <Stack.Navigator
-        initialRouteName="HomeScreen"
-        screenOptions={({ navigation, route }) => ({
-          headerRight: () => <HeaderRight />,
-          headerBackTitleVisible: false,
-          headerLeft: () => {
-            // HomeScreen is the root - no back button
-            if (route.name === 'HomeScreen') {
-              return null;
-            }
-
-            // Determine the back navigation target
-            // HostQueueScreen should go back to HostDashboardScreen (My Queues)
-            // Other screens go back to HomeScreen or use native back if available
-            const handleBack = () => {
-              if (navigation.canGoBack()) {
-                navigation.goBack();
-              } else if (route.name === 'HostQueueScreen') {
-                // Host queue screens should go back to My Queues
-                navigation.navigate('HostDashboardScreen');
-              } else {
-                // All other screens go back to Home
-                navigation.navigate('HomeScreen');
+      <View style={{ flex: 1 }}>
+        <AdBanner variant="banner" />
+        <Stack.Navigator
+          initialRouteName="HomeScreen"
+          screenOptions={({ navigation, route }) => ({
+            headerRight: () => <HeaderRight />,
+            headerBackTitleVisible: false,
+            headerLeft: () => {
+              // HomeScreen is the root - no back button
+              if (route.name === 'HomeScreen') {
+                return null;
               }
-            };
 
-            return (
-              <Pressable
-                style={headerStyles.backButton}
-                accessibilityRole="button"
-                accessibilityLabel="Go back"
-                hitSlop={12}
-                onPress={handleBack}>
-                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
-              </Pressable>
-            );
-          },
-        })}>
-        <Stack.Screen name="HomeScreen" component={HomeScreen} options={{ title: '' }} />
-        <Stack.Screen name="LoginScreen" component={LoginScreen} options={{ title: '' }} />
-        <Stack.Screen name="MakeQueueScreen" component={MakeQueueScreen} options={{ title: '' }} />
-        <Stack.Screen name="JoinQueueScreen" component={JoinQueueScreen} options={{ title: '' }} />
-        <Stack.Screen
-          name="GuestQueueScreen"
-          component={GuestQueueScreen}
-          options={{ title: '' }}
-        />
-        <Stack.Screen name="HostQueueScreen" component={HostQueueScreen} options={{ title: '' }} />
-        <Stack.Screen
-          name="PrivacyPolicyScreen"
-          component={PrivacyPolicyScreen}
-          options={{ title: '' }}
-        />
-        <Stack.Screen
-          name="AdminDashboardScreen"
-          component={AdminDashboardScreen}
-          options={{ title: '' }}
-        />
-        <Stack.Screen
-          name="HostDashboardScreen"
-          component={HostDashboardScreen}
-          options={{ title: '' }}
-        />
-      </Stack.Navigator>
+              // Determine the back navigation target
+              // HostQueueScreen should go back to HostDashboardScreen (My Queues)
+              // Other screens go back to HomeScreen or use native back if available
+              const handleBack = () => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else if (route.name === 'HostQueueScreen') {
+                  // Host queue screens should go back to My Queues
+                  navigation.navigate('HostDashboardScreen');
+                } else {
+                  // All other screens go back to Home
+                  navigation.navigate('HomeScreen');
+                }
+              };
+
+              return (
+                <Pressable
+                  style={headerStyles.backButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go back"
+                  hitSlop={12}
+                  onPress={handleBack}>
+                  <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+                </Pressable>
+              );
+            },
+          })}>
+          <Stack.Screen name="HomeScreen" component={HomeScreen} options={{ title: '' }} />
+          <Stack.Screen name="LoginScreen" component={LoginScreen} options={{ title: '' }} />
+          <Stack.Screen name="MakeQueueScreen" component={MakeQueueScreen} options={{ title: '' }} />
+          <Stack.Screen name="JoinQueueScreen" component={JoinQueueScreen} options={{ title: '' }} />
+          <Stack.Screen
+            name="GuestQueueScreen"
+            component={GuestQueueScreen}
+            options={{ title: '' }}
+          />
+          <Stack.Screen name="HostQueueScreen" component={HostQueueScreen} options={{ title: '' }} />
+          <Stack.Screen
+            name="PrivacyPolicyScreen"
+            component={PrivacyPolicyScreen}
+            options={{ title: '' }}
+          />
+          <Stack.Screen
+            name="AdminDashboardScreen"
+            component={AdminDashboardScreen}
+            options={{ title: '' }}
+          />
+          <Stack.Screen
+            name="HostDashboardScreen"
+            component={HostDashboardScreen}
+            options={{ title: '' }}
+          />
+        </Stack.Navigator>
+        <AdPopup visible={showPopup} onClose={closePopup} />
+      </View>
     </NavigationContainer>
   );
 }
@@ -376,7 +384,9 @@ export default function App() {
   return (
     <AuthProvider>
       <ModalProvider>
-        <AppNavigator />
+        <AdProvider>
+          <AppNavigator />
+        </AdProvider>
       </ModalProvider>
     </AuthProvider>
   );
