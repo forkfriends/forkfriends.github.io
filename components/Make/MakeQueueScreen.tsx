@@ -465,7 +465,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
       });
       if (created.hostAuthToken) {
         try {
-          await storage.setHostAuth(created.sessionId, created.hostAuthToken);
+          await storage.setHostAuth(created.sessionId, created.hostAuthToken, created.code);
           // Store the full queue details right when it's created
           await storage.setActiveQueue({
             code: created.code,

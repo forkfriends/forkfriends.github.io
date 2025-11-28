@@ -295,34 +295,14 @@ function HeaderRight() {
 function AppNavigator() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
 
-  const updateTitle = () => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') {
-      return;
-    }
-
-    const currentRoute = navigationRef.getCurrentRoute();
-    if (currentRoute) {
-      const screenTitle = getScreenTitle(currentRoute.name);
-      document.title = `QueueUp - ${screenTitle}`;
-    } else {
-      document.title = 'QueueUp - Home';
-    }
-  };
-
-  const handleStateChange = () => {
-    updateTitle();
-  };
-
-  const handleReady = () => {
-    updateTitle();
-  };
-
   return (
     <NavigationContainer
       ref={navigationRef}
       linking={linking}
-      onStateChange={handleStateChange}
-      onReady={handleReady}>
+      documentTitle={{
+        formatter: (_options, route) =>
+          `QueueUp - ${getScreenTitle(route?.name ?? 'HomeScreen')}`,
+      }}>
       <StatusBar style="auto" />
       <Stack.Navigator
         initialRouteName="HomeScreen"

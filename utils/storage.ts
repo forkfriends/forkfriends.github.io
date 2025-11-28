@@ -11,6 +11,7 @@ import {
 const ACTIVE_QUEUES_KEY = 'queueup-active-queues';
 const JOINED_QUEUES_KEY = 'queueup-joined-queues';
 const HOST_AUTH_PREFIX = 'queueup-host-auth:';
+const HOST_AUTH_CODE_PREFIX = 'queueup-host-auth-code:';
 const TRUST_SURVEY_PREFIX = 'queueup-trust-survey:';
 const QUEUES_LAST_SYNC_KEY = 'queueup-queues-last-sync';
 const MEMBERSHIPS_LAST_SYNC_KEY = 'queueup-memberships-last-sync';
@@ -199,18 +200,30 @@ export const storage = {
 
       // Merge with local queues to preserve hostAuthTokens and wsUrls
       const localQueues = await this.getActiveQueuesLocal();
-      const mergedQueues = serverQueues.map((sq) => {
-        const local = localQueues.find((lq) => lq.sessionId === sq.sessionId);
-        if (local) {
-          return {
-            ...sq,
-            wsUrl: local.wsUrl || sq.wsUrl,
-            hostAuthToken: local.hostAuthToken || sq.hostAuthToken,
-            joinUrl: local.joinUrl || sq.joinUrl,
-          };
-        }
-        return sq;
-      });
+      const mergedQueues = await Promise.all(
+        serverQueues.map(async (sq) => {
+          const local = localQueues.find((lq) => lq.sessionId === sq.sessionId);
+          let hostAuthToken = local?.hostAuthToken || sq.hostAuthToken;
+
+          // If no hostAuthToken from local queue data, try dedicated host auth storage
+          if (!hostAuthToken && sq.sessionId) {
+            const storedToken = await this.getHostAuth(sq.sessionId);
+            if (storedToken) {
+              hostAuthToken = storedToken;
+            }
+          }
+
+          if (local) {
+            return {
+              ...sq,
+              wsUrl: local.wsUrl || sq.wsUrl,
+              hostAuthToken,
+              joinUrl: local.joinUrl || sq.joinUrl,
+            };
+          }
+          return { ...sq, hostAuthToken };
+        })
+      );
 
       // Save merged queues to localStorage as cache
       const value = JSON.stringify(mergedQueues);
@@ -258,21 +271,45 @@ export const storage = {
   // Host Auth Tokens
   // ============================================
 
-  async setHostAuth(sessionId: string, token: string): Promise<void> {
-    const key = `${HOST_AUTH_PREFIX}${sessionId}`;
+  async setHostAuth(sessionId: string, token: string, code?: string): Promise<void> {
+    const sessionKey = `${HOST_AUTH_PREFIX}${sessionId}`;
+    const codeKey = code ? `${HOST_AUTH_CODE_PREFIX}${code}` : null;
+
     if (Platform.OS === 'web') {
       try {
-        window.localStorage.setItem(key, token);
-      } catch {
-        await AsyncStorage.setItem(key, token);
+        window.localStorage.setItem(sessionKey, token);
+        if (codeKey) {
+          window.localStorage.setItem(codeKey, token);
+        }
+      } catch (error) {
+        console.warn('[storage.setHostAuth] localStorage failed, using AsyncStorage:', error);
+        await AsyncStorage.setItem(sessionKey, token);
+        if (codeKey) {
+          await AsyncStorage.setItem(codeKey, token);
+        }
       }
     } else {
-      await AsyncStorage.setItem(key, token);
+      await AsyncStorage.setItem(sessionKey, token);
+      if (codeKey) {
+        await AsyncStorage.setItem(codeKey, token);
+      }
     }
   },
 
   async getHostAuth(sessionId: string): Promise<string | null> {
     const key = `${HOST_AUTH_PREFIX}${sessionId}`;
+    if (Platform.OS === 'web') {
+      try {
+        return window.localStorage.getItem(key);
+      } catch {
+        return AsyncStorage.getItem(key);
+      }
+    }
+    return AsyncStorage.getItem(key);
+  },
+
+  async getHostAuthByCode(code: string): Promise<string | null> {
+    const key = `${HOST_AUTH_CODE_PREFIX}${code}`;
     if (Platform.OS === 'web') {
       try {
         return window.localStorage.getItem(key);

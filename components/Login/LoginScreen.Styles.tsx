@@ -15,9 +15,9 @@ export default StyleSheet.create({
   desktopContainer: {
     flex: 1,
     flexDirection: 'row',
-    maxWidth: 1100,
     width: '100%',
-    alignSelf: 'center',
+    minHeight: '100%',
+    paddingHorizontal: 0,
   },
   desktopBrandingColumn: {
     flex: 1,

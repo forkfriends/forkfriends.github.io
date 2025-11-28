@@ -27,8 +27,9 @@ import {
   buildHostWsUrlFromCode,
 } from '../../lib/backend';
 import { Feather } from '@expo/vector-icons';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Lock, Users } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
+import { useAuth } from '../../contexts/AuthContext';
 import Timer from '../Timer';
 import { trackEvent } from '../../utils/analytics';
 import { generatePosterImage } from './posterGenerator';
@@ -86,6 +87,7 @@ const RECONNECT_DELAY_MS = 3000;
 export default function HostQueueScreen({ route, navigation }: Props) {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
 
   const {
     code,
@@ -133,9 +135,15 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       return;
     }
 
+    // Wait for auth loading to complete before trying to recover
+    // This prevents a race condition where we try to fetch queues before knowing auth state
+    if (isAuthLoading) {
+      return;
+    }
+
     const recoverParams = async () => {
       try {
-        const activeQueues = await storage.getActiveQueues();
+        const activeQueues = await storage.getActiveQueues(isAuthenticated, true);
         const activeQueue = activeQueues.find((q) => q.code === code);
         if (activeQueue?.sessionId) {
           // Try to get host auth token from dedicated storage as fallback
@@ -145,6 +153,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
             const storedToken = await storage.getHostAuth(activeQueue.sessionId);
             if (storedToken) {
               hostAuthToken = storedToken;
+            }
+          }
+          // Also try by code as another fallback
+          if (!hostAuthToken && code) {
+            const storedTokenByCode = await storage.getHostAuthByCode(code);
+            if (storedTokenByCode) {
+              hostAuthToken = storedTokenByCode;
             }
           }
 
@@ -186,7 +201,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     };
 
     void recoverParams();
-  }, [code, initialSessionId, initialWsUrl, navigation]);
+  }, [code, initialSessionId, initialWsUrl, navigation, isAuthenticated, isAuthLoading]);
 
   // Override the back button behavior to go to HomeScreen
   useEffect(() => {
@@ -209,6 +224,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, [navigation]);
 
   const storageKey = sessionId ? `queueup-host-auth:${sessionId}` : '';
+  const storageCodeKey = code ? `queueup-host-auth-code:${code}` : '';
 
   const displayEventName = eventName?.trim() || null;
   const scheduleLine = useMemo(
@@ -224,7 +240,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       return initialHostAuthToken;
     }
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      return window.sessionStorage.getItem(storageKey) ?? undefined;
+      // Prefer durable localStorage (used by storage.setHostAuth), fall back to sessionStorage
+      const fromLocal = storageKey ? window.localStorage.getItem(storageKey) : null;
+      const fromLocalCode = storageCodeKey ? window.localStorage.getItem(storageCodeKey) : null;
+      const fromSession = storageKey ? window.sessionStorage.getItem(storageKey) : null;
+      if (fromLocal) return fromLocal;
+      if (fromLocalCode) return fromLocalCode;
+      if (fromSession) return fromSession;
     }
     return undefined;
   });
@@ -258,6 +280,33 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     etag.current = null;
     hasInitializedQueue.current = false;
   }, [code, sessionId]);
+
+  // If we were navigated here without a host token (e.g., after logout/login),
+  // try to recover it from persistent storage using the sessionId.
+  useEffect(() => {
+    if (hostToken || !sessionId) return;
+
+    (async () => {
+      try {
+        const stored = await storage.getHostAuth(sessionId);
+        const storedByCode = stored ? null : await storage.getHostAuthByCode(code);
+        if (stored) {
+          setHostToken(stored);
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.sessionStorage.setItem(storageKey, stored);
+          }
+        } else if (storedByCode) {
+          setHostToken(storedByCode);
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            if (storageKey) window.sessionStorage.setItem(storageKey, storedByCode);
+            if (storageCodeKey) window.sessionStorage.setItem(storageCodeKey, storedByCode);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to recover host auth from storage', err);
+      }
+    })();
+  }, [hostToken, sessionId, storageKey, storageCodeKey, code]);
 
   useEffect(() => {
     if (!initialHostAuthToken) {
@@ -307,6 +356,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     return baseUrl;
   }, [wsUrl]);
   const hasHostAuth = Boolean(hostToken);
+  const recoveringHostAuth = !hasHostAuth && Boolean(sessionId);
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeout.current) {
@@ -452,8 +502,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, [hasHostAuth, snapshotUrl, poll]);
 
   useEffect(() => {
-    // Don't show auth error while still recovering params from storage
-    if (isRecoveringParams) {
+    // Don't show auth error while still recovering params from storage or host auth
+    // Also pause if the user has logged out
+    if (isRecoveringParams || recoveringHostAuth || !isAuthenticated) {
       return;
     }
 
@@ -470,10 +521,24 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       clearReconnectTimeout();
       stopPolling();
     };
-  }, [startPolling, clearReconnectTimeout, stopPolling, hasHostAuth, isRecoveringParams]);
+  }, [
+    startPolling,
+    clearReconnectTimeout,
+    stopPolling,
+    hasHostAuth,
+    isRecoveringParams,
+    recoveringHostAuth,
+    isAuthenticated,
+  ]);
 
   const queueCount = queue.length;
-  const shareableLink = joinUrl ?? null;
+  const shareableLink = useMemo(() => {
+    if (joinUrl) return joinUrl;
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}/queue/${code}`;
+    }
+    return null;
+  }, [joinUrl, code]);
   const buildPosterDetails = useCallback(() => {
     const lines: string[] = [];
     if (displayEventName) {
@@ -845,6 +910,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     poll();
   }, [poll]);
 
+  // If auth state drops while on this screen, send user home to avoid stale host controls
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigation.replace('HomeScreen');
+    }
+  }, [isAuthenticated, navigation]);
+
   const renderQueueList = () => {
     if (queueCount === 0) {
       return (
@@ -1125,7 +1197,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     if (queueCount === 0) {
       return (
         <View style={styles.desktopEmptyState}>
-          <Text style={styles.desktopEmptyStateIcon}>{closed ? '🔒' : '👥'}</Text>
+          {closed ? (
+            <Lock style={styles.desktopEmptyStateIcon as never} size={56} strokeWidth={2.2} />
+          ) : (
+            <Users style={styles.desktopEmptyStateIcon as never} size={56} strokeWidth={2.2} />
+          )}
           <Text style={styles.desktopEmptyStateText}>
             {closed
               ? 'Queue has been closed.'
@@ -1318,8 +1394,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     );
   }
 
-  // Show loading state while recovering params from storage
-  if (isRecoveringParams) {
+  // Show loading state while recovering params from storage or waiting for auth
+  if (isRecoveringParams || isAuthLoading) {
     return (
       <SafeAreaProvider style={styles.safe}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>

@@ -88,10 +88,15 @@ export default function HostDashboardScreen({ navigation }: Props) {
     async (queue: MyQueue) => {
       // Build the WebSocket URL from the queue code
       const wsUrl = buildHostWsUrlFromCode(queue.shortCode);
+      const joinUrl =
+        typeof window !== 'undefined' ? `${window.location.origin}/queue/${queue.shortCode}` : undefined;
 
       // Try to get the stored host auth token
       try {
-        const hostAuth = await storage.getHostAuth(queue.id);
+        let hostAuth = await storage.getHostAuth(queue.id);
+        if (!hostAuth) {
+          hostAuth = await storage.getHostAuthByCode(queue.shortCode);
+        }
         if (hostAuth) {
           // Navigate to host queue screen
           navigation.navigate('HostQueueScreen', {
@@ -99,6 +104,7 @@ export default function HostDashboardScreen({ navigation }: Props) {
             sessionId: queue.id,
             wsUrl,
             hostAuthToken: hostAuth,
+            joinUrl,
             eventName: queue.eventName ?? undefined,
             maxGuests: queue.maxGuests ?? undefined,
             location: queue.location,
@@ -119,6 +125,7 @@ export default function HostDashboardScreen({ navigation }: Props) {
         code: queue.shortCode,
         sessionId: queue.id,
         wsUrl,
+        joinUrl,
         eventName: queue.eventName ?? undefined,
         maxGuests: queue.maxGuests ?? undefined,
         location: queue.location,

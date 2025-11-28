@@ -32,6 +32,7 @@ import { trackEvent } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import { useModal } from '../../contexts/ModalContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { ArrowLeft, Bell, BellRing, Smartphone, Users } from 'lucide-react-native';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -750,9 +751,11 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       <Pressable
         style={[styles.pushButton, pushReady && styles.pushButtonActive]}
         onPress={() => void enablePush()}>
-        <Text style={[styles.pushIcon, pushReady && styles.pushIconActive]}>
-          {pushReady ? '🔔✓' : '🔔'}
-        </Text>
+        {pushReady ? (
+          <BellRing style={styles.pushIcon as never} size={18} strokeWidth={2.2} />
+        ) : (
+          <Bell style={styles.pushIcon as never} size={18} strokeWidth={2.2} />
+        )}
         <Text style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>
           {pushReady ? 'Notifications on' : 'Enable notifications'}
         </Text>
@@ -968,17 +971,17 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       <View style={styles.infoTipCard}>
         <Text style={styles.infoTipTitle}>Pro Tips</Text>
         <View style={styles.infoFeatureRow}>
-          <Text style={styles.infoFeatureIcon}>🔔</Text>
+          <Bell style={styles.infoFeatureIcon as never} size={18} strokeWidth={2.4} />
           <Text style={styles.infoFeatureText}>
             Enable notifications to get alerted when it is your turn
           </Text>
         </View>
         <View style={styles.infoFeatureRow}>
-          <Text style={styles.infoFeatureIcon}>📱</Text>
+          <Smartphone style={styles.infoFeatureIcon as never} size={18} strokeWidth={2.4} />
           <Text style={styles.infoFeatureText}>Keep this page open to see live updates</Text>
         </View>
         <View style={styles.infoFeatureRow}>
-          <Text style={styles.infoFeatureIcon}>👥</Text>
+          <Users style={styles.infoFeatureIcon as never} size={18} strokeWidth={2.4} />
           <Text style={styles.infoFeatureText}>
             Set your party size accurately for better wait estimates
           </Text>

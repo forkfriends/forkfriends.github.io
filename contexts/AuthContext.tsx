@@ -447,8 +447,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     await logoutFromServer(sessionToken);
     await clearStoredSessionToken();
-    // Clear all host auth tokens to prevent persistence on shared devices
-    await storage.clearAllHostAuth();
     await storage.clearQueuesCache();
     setSessionToken(null);
     setState({
