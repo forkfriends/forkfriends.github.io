@@ -6,6 +6,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
 import { useAuth } from '../../contexts/AuthContext';
+import { useModal } from '../../contexts/ModalContext';
+import AdBanner from '../Ads/AdBanner';
 import styles from './HomeScreen.Styles';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;
@@ -230,6 +232,8 @@ export default function HomeScreen({ navigation }: Props) {
                 Your active queues will appear here once you create or join one.
               </Text>
             )}
+
+            <AdBanner />
           </View>
         </View>
       </SafeAreaProvider>
@@ -348,6 +352,8 @@ export default function HomeScreen({ navigation }: Props) {
           <Pressable onPress={() => navigation.navigate('AdminDashboardScreen')}>
             <Text style={styles.privacyLink}>Analytics Dashboard</Text>
           </Pressable>
+
+          <AdBanner />
         </View>
       </View>
     </SafeAreaProvider>

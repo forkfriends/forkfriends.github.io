@@ -1034,7 +1034,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         <Text style={styles.nowServingHeading}>Now Serving</Text>
         <Text style={styles.nowServingValue}>
           {nowServing
-            ? `${nowServing.name?.trim() || 'Guest'}${
+            ? `${nowServing.name?.trim() || 'Anonymous Guest'}${
                 nowServing.size ? ` (${nowServing.size})` : ''
               }`
             : 'No party currently called.'}
@@ -1229,7 +1229,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           </View>
           <View style={styles.desktopQueueItemInfo}>
             <Text style={styles.queueItemName}>
-              {party.name?.trim() || 'Guest'} {party.size ? `(${party.size})` : ''}
+              {party.name?.trim() || 'Anonymous Guest'} {party.size ? `(${party.size})` : ''}
             </Text>
             <Text style={styles.queueItemMeta}>
               {party.status === 'waiting' ? 'Waiting' : 'Called'} ·{' '}

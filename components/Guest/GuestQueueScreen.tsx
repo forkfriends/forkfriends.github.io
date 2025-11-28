@@ -39,6 +39,7 @@ const ANALYTICS_SCREEN = 'guest_queue';
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
   // Override the back button behavior to go to HomeScreen
+  const anonymousNames = ['Kuokat', 'Numbat', 'Quokka', 'Wombat', 'Bandicoot', 'Wallaby', 'Kangaroo', 'Dingoe', 'Possum', 'Tasmanian Devil', 'Dunnart', 'Bilby', 'Ostrich', 'Emu', 'Cassowary', 'Lyrebird', 'Kookaburra', 'Cockatoo', 'Frill-necked Lizard', 'Goanna', 'Skink', 'Taipan', 'Tapir', 'Capybara', 'Aardvark', 'Armadillo', 'Sloth', 'Meerkat', 'Mongoose', 'Fossa', 'Quoll', 'Sugar Glider', 'Flying Fox', 'Echidna', 'Platypus'];
   useEffect(() => {
     navigation.setOptions({
       headerLeft: () => (
@@ -76,6 +77,20 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
 
   // Effective partyId: use route param if available, otherwise use recovered value
   const partyId = initialPartyId || recoveredPartyId;
+
+  const anonymousDisplayName = useMemo(() => {
+    if (guestName?.trim()) {
+      return null;
+    }
+    const key = partyId || code || 'anon';
+    let hash = 0;
+    for (let i = 0; i < key.length; i += 1) {
+      hash = (hash << 5) - hash + key.charCodeAt(i);
+      hash |= 0; // force 32-bit
+    }
+    const idx = Math.abs(hash) % anonymousNames.length;
+    return `Anonymous ${anonymousNames[idx]}`;
+  }, [anonymousNames, guestName, partyId, code]);
 
   // Recover partyId from storage when missing (e.g., page refresh)
   useEffect(() => {
@@ -913,7 +928,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       <Text style={styles.sectionTitle}>Your Party</Text>
       <View style={styles.detailRow}>
         <Text style={styles.detailLabel}>Name</Text>
-        <Text style={styles.detailValue}>{guestName?.trim() || 'Anonymous'}</Text>
+        <Text style={styles.detailValue}>{guestName?.trim() || anonymousDisplayName}</Text>
       </View>
       <View style={styles.detailRow}>
         <Text style={styles.detailLabel}>Party Size</Text>
