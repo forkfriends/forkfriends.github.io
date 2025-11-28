@@ -31,6 +31,7 @@ export default StyleSheet.create({
     borderLeftWidth: 1,
     borderLeftColor: '#e6e6e6',
     justifyContent: 'center',
+    overflow: 'scroll',
   },
   innerContainer: {
     width: '100%',
