@@ -28,6 +28,7 @@ import HostQueueScreen from './components/Host/HostQueueScreen';
 import GuestQueueScreen from './components/Guest/GuestQueueScreen';
 import PrivacyPolicyScreen from './components/PrivacyPolicy/PrivacyPolicyScreen';
 import AdminDashboardScreen from './components/Admin/AdminDashboardScreen';
+import HostDashboardScreen from './components/HostDashboard/HostDashboardScreen';
 import LoginScreen from './components/Login/LoginScreen';
 import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
@@ -35,6 +36,63 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import React, { useState } from 'react';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+// Linking configuration for deep links and web URLs
+const linking = {
+  prefixes: ['queueup://', 'https://queueup.app', 'http://localhost:8081'],
+  config: {
+    screens: {
+      HomeScreen: '',
+      LoginScreen: 'login',
+      MakeQueueScreen: 'make',
+      JoinQueueScreen: 'join/:code?',
+      // Only use the code in the URL path - sensitive params are passed via
+      // navigation state and recovered from storage on page refresh
+      GuestQueueScreen: {
+        path: 'queue/:code',
+        parse: {
+          code: (code: string) => code,
+        },
+        stringify: {
+          code: (code: string) => code,
+          // Exclude sensitive params from URL
+          partyId: () => undefined as unknown as string,
+          sessionId: () => undefined as unknown as string,
+          initialPosition: () => undefined as unknown as string,
+          initialAheadCount: () => undefined as unknown as string,
+          initialQueueLength: () => undefined as unknown as string,
+          initialEtaMs: () => undefined as unknown as string,
+          guestName: () => undefined as unknown as string,
+          partySize: () => undefined as unknown as string,
+        },
+      },
+      HostQueueScreen: {
+        path: 'host/:code',
+        parse: {
+          code: (code: string) => code,
+        },
+        stringify: {
+          code: (code: string) => code,
+          // Exclude sensitive params from URL
+          sessionId: () => undefined as unknown as string,
+          wsUrl: () => undefined as unknown as string,
+          hostAuthToken: () => undefined as unknown as string,
+          joinUrl: () => undefined as unknown as string,
+          eventName: () => undefined as unknown as string,
+          maxGuests: () => undefined as unknown as string,
+          location: () => undefined as unknown as string,
+          contactInfo: () => undefined as unknown as string,
+          openTime: () => undefined as unknown as string,
+          closeTime: () => undefined as unknown as string,
+          requiresAuth: () => undefined as unknown as string,
+        },
+      },
+      PrivacyPolicyScreen: 'privacy',
+      AdminDashboardScreen: 'admin',
+      HostDashboardScreen: 'my-queues',
+    },
+  },
+};
 
 const headerStyles = StyleSheet.create({
   headerRight: {
@@ -141,6 +199,7 @@ const getScreenTitle = (screenName: string): string => {
     GuestQueueScreen: 'Guest Queue',
     PrivacyPolicyScreen: 'Privacy Policy',
     AdminDashboardScreen: 'Analytics',
+    HostDashboardScreen: 'My Queues',
   };
   return screenTitles[screenName] || screenName;
 };
@@ -236,33 +295,14 @@ function HeaderRight() {
 function AppNavigator() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
 
-  const updateTitle = () => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') {
-      return;
-    }
-
-    const currentRoute = navigationRef.getCurrentRoute();
-    if (currentRoute) {
-      const screenTitle = getScreenTitle(currentRoute.name);
-      document.title = `QueueUp - ${screenTitle}`;
-    } else {
-      document.title = 'QueueUp - Home';
-    }
-  };
-
-  const handleStateChange = () => {
-    updateTitle();
-  };
-
-  const handleReady = () => {
-    updateTitle();
-  };
-
   return (
     <NavigationContainer
       ref={navigationRef}
-      onStateChange={handleStateChange}
-      onReady={handleReady}>
+      linking={linking}
+      documentTitle={{
+        formatter: (_options, route) =>
+          `QueueUp - ${getScreenTitle(route?.name ?? 'HomeScreen')}`,
+      }}>
       <StatusBar style="auto" />
       <Stack.Navigator
         initialRouteName="HomeScreen"
@@ -270,19 +310,33 @@ function AppNavigator() {
           headerRight: () => <HeaderRight />,
           headerBackTitleVisible: false,
           headerLeft: () => {
+            // HomeScreen is the root - no back button
             if (route.name === 'HomeScreen') {
               return null;
             }
-            if (!navigation.canGoBack()) {
-              return null;
-            }
+
+            // Determine the back navigation target
+            // HostQueueScreen should go back to HostDashboardScreen (My Queues)
+            // Other screens go back to HomeScreen or use native back if available
+            const handleBack = () => {
+              if (navigation.canGoBack()) {
+                navigation.goBack();
+              } else if (route.name === 'HostQueueScreen') {
+                // Host queue screens should go back to My Queues
+                navigation.navigate('HostDashboardScreen');
+              } else {
+                // All other screens go back to Home
+                navigation.navigate('HomeScreen');
+              }
+            };
+
             return (
               <Pressable
                 style={headerStyles.backButton}
                 accessibilityRole="button"
                 accessibilityLabel="Go back"
                 hitSlop={12}
-                onPress={() => navigation.goBack()}>
+                onPress={handleBack}>
                 <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
               </Pressable>
             );
@@ -306,6 +360,11 @@ function AppNavigator() {
         <Stack.Screen
           name="AdminDashboardScreen"
           component={AdminDashboardScreen}
+          options={{ title: '' }}
+        />
+        <Stack.Screen
+          name="HostDashboardScreen"
+          component={HostDashboardScreen}
           options={{ title: '' }}
         />
       </Stack.Navigator>

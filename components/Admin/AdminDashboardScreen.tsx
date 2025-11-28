@@ -6,15 +6,15 @@ import {
   Pressable,
   ActivityIndicator,
   RefreshControl,
-  Linking,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
 import { API_BASE_URL } from '../../lib/backend';
 import { useAuth } from '../../contexts/AuthContext';
-import styles from './AdminDashboardScreen.Styles';
+import styles, { createResponsiveStyles } from './AdminDashboardScreen.Styles';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AdminDashboardScreen'>;
 
@@ -89,6 +89,11 @@ interface AnalyticsData {
     left: number;
     no_show: number;
   }>;
+  trustSurveyStats: {
+    total_responses: number;
+    trust_yes: number;
+    trust_no: number;
+  };
 }
 
 const PERIOD_OPTIONS = [
@@ -100,6 +105,10 @@ const PERIOD_OPTIONS = [
 
 // Storage key must match AuthContext
 const AUTH_SESSION_KEY = 'queueup-auth-session';
+
+// Breakpoints
+const DESKTOP_BREAKPOINT = 1024;
+const TABLET_BREAKPOINT = 768;
 
 // Get session token for API calls (needed for cross-origin like localhost)
 function getSessionToken(): string | null {
@@ -113,7 +122,32 @@ function getSessionToken(): string | null {
   return null;
 }
 
+// Chart colors
+const CHART_COLORS = {
+  primary: '#3b82f6',
+  success: '#10b981',
+  warning: '#f59e0b',
+  danger: '#ef4444',
+  gray: '#6b7280',
+  purple: '#8b5cf6',
+  pink: '#ec4899',
+  indigo: '#6366f1',
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  served: CHART_COLORS.success,
+  waiting: CHART_COLORS.primary,
+  called: CHART_COLORS.warning,
+  left: CHART_COLORS.danger,
+  no_show: CHART_COLORS.gray,
+  kicked: CHART_COLORS.pink,
+};
+
 export default function AdminDashboardScreen(_props: Props) {
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= DESKTOP_BREAKPOINT;
+  const responsiveStyles = createResponsiveStyles(width);
+
   const { user, isLoading: authLoading, isAdmin, login } = useAuth();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -234,82 +268,150 @@ export default function AdminDashboardScreen(_props: Props) {
     return labels[status] || status;
   };
 
-  const renderConversionFunnel = () => {
-    const scans = data?.joinFunnel?.qr_scanned ?? 0;
-    const started = data?.joinFunnel?.join_started ?? 0;
-    const completed = data?.joinFunnel?.join_completed ?? 0;
-    const abandoned = data?.joinFunnel?.abandoned ?? 0;
+  // Donut chart component
+  const renderDonutChart = (
+    segments: Array<{ label: string; value: number; color: string }>,
+    size: number = 120
+  ) => {
+    const total = segments.reduce((sum, s) => sum + s.value, 0);
+    if (total === 0) {
+      return (
+        <View style={[styles.donutContainer, { width: size, height: size }]}>
+          <View style={[styles.donutEmpty, { width: size, height: size, borderRadius: size / 2 }]}>
+            <Text style={styles.donutEmptyText}>No data</Text>
+          </View>
+        </View>
+      );
+    }
 
-    const startRate = scans > 0 ? started / scans : 0;
-    const completeRatePrev = started > 0 ? completed / started : 0;
-    const abandonRatePrev = started > 0 ? abandoned / started : 0;
-    const overallCompletion = scans > 0 ? completed / scans : 0;
+    // Calculate segments for conic gradient (web only)
+    let cumulativePercent = 0;
+    const gradientStops = segments
+      .filter((s) => s.value > 0)
+      .map((segment) => {
+        const percent = (segment.value / total) * 100;
+        const start = cumulativePercent;
+        cumulativePercent += percent;
+        return `${segment.color} ${start}% ${cumulativePercent}%`;
+      })
+      .join(', ');
 
-    // Pending = started - completed - abandoned
-    const pending = Math.max(started - completed - abandoned, 0);
-    const notStarted = Math.max(scans - started, 0);
-    const base = scans || 1;
-
-    const segments: Array<{ key: string; value: number; style: any; label: string }> = [
-      {
-        key: 'not_started',
-        value: notStarted,
-        style: styles.segmentNotStarted,
-        label: 'Not Started',
-      },
-      { key: 'pending', value: pending, style: styles.segmentPending, label: 'Pending' },
-      { key: 'completed', value: completed, style: styles.segmentCompleted, label: 'Completed' },
-      { key: 'abandoned', value: abandoned, style: styles.segmentAbandoned, label: 'Abandoned' },
-    ];
+    const innerSize = size * 0.6;
 
     return (
-      <View style={styles.conversionWrapper}>
-        <Text style={styles.conversionSummary}>
-          Start {Math.round(startRate * 100)}% • Complete {Math.round(completeRatePrev * 100)}% •
-          Abandon {Math.round(abandonRatePrev * 100)}% • Overall{' '}
-          {Math.round(overallCompletion * 100)}%
-        </Text>
-        <View style={styles.conversionSegmentsRow}>
-          {segments.map((seg) => {
-            const pct = base > 0 ? seg.value / base : 0;
-            if (pct <= 0) return null;
+      <View style={styles.donutWrapper}>
+        <View
+          style={[
+            styles.donutContainer,
+            {
+              width: size,
+              height: size,
+              borderRadius: size / 2,
+              // @ts-ignore - web-only style
+              background: `conic-gradient(${gradientStops})`,
+            },
+          ]}>
+          <View
+            style={[
+              styles.donutInner,
+              {
+                width: innerSize,
+                height: innerSize,
+                borderRadius: innerSize / 2,
+              },
+            ]}>
+            <Text style={styles.donutTotal}>{formatNumber(total)}</Text>
+            <Text style={styles.donutTotalLabel}>Total</Text>
+          </View>
+        </View>
+        <View style={styles.donutLegend}>
+          {segments
+            .filter((s) => s.value > 0)
+            .map((segment) => (
+              <View key={segment.label} style={styles.donutLegendItem}>
+                <View style={[styles.donutLegendDot, { backgroundColor: segment.color }]} />
+                <Text style={styles.donutLegendLabel}>{segment.label}</Text>
+                <Text style={styles.donutLegendValue}>{formatNumber(segment.value)}</Text>
+              </View>
+            ))}
+        </View>
+      </View>
+    );
+  };
+
+  // Bar chart with labels
+  const renderBarChart = (
+    data: Array<{ label: string; value: number; color?: string }>,
+    options: { height?: number; showValues?: boolean; horizontal?: boolean } = {}
+  ) => {
+    const { height = 200, showValues = true, horizontal = false } = options;
+    const maxValue = Math.max(...data.map((d) => d.value), 1);
+
+    if (horizontal) {
+      return (
+        <View style={styles.horizontalBarChart}>
+          {data.map((item, index) => {
+            const percent = (item.value / maxValue) * 100;
             return (
-              <View key={seg.key} style={[styles.conversionSegment, seg.style, { flex: pct }]}>
-                {pct > 0.07 && (
-                  <Text style={styles.conversionSegmentText}>{Math.round(pct * 100)}%</Text>
+              <View key={item.label} style={styles.horizontalBarRow}>
+                <Text style={styles.horizontalBarLabel} numberOfLines={1}>
+                  {item.label}
+                </Text>
+                <View style={styles.horizontalBarTrack}>
+                  <View
+                    style={[
+                      styles.horizontalBarFill,
+                      {
+                        width: `${Math.max(percent, 2)}%`,
+                        backgroundColor: item.color || CHART_COLORS.primary,
+                      },
+                    ]}
+                  />
+                </View>
+                {showValues && (
+                  <Text style={styles.horizontalBarValue}>{formatNumber(item.value)}</Text>
                 )}
               </View>
             );
           })}
         </View>
-        <View style={styles.conversionLegendRow}>
-          <View style={styles.conversionLegendItem}>
-            <View style={[styles.conversionLegendSwatch, styles.segmentNotStarted]} />
-            <Text style={styles.conversionLegendLabel}>
-              Not Started ({formatNumber(notStarted)})
-            </Text>
-          </View>
-          <View style={styles.conversionLegendItem}>
-            <View style={[styles.conversionLegendSwatch, styles.segmentPending]} />
-            <Text style={styles.conversionLegendLabel}>Pending ({formatNumber(pending)})</Text>
-          </View>
-          <View style={styles.conversionLegendItem}>
-            <View style={[styles.conversionLegendSwatch, styles.segmentCompleted]} />
-            <Text style={styles.conversionLegendLabel}>Completed ({formatNumber(completed)})</Text>
-          </View>
-          <View style={styles.conversionLegendItem}>
-            <View style={[styles.conversionLegendSwatch, styles.segmentAbandoned]} />
-            <Text style={styles.conversionLegendLabel}>Abandoned ({formatNumber(abandoned)})</Text>
-          </View>
+      );
+    }
+
+    return (
+      <View style={[styles.barChartContainer, { height }]}>
+        <View style={styles.barChartBars}>
+          {data.map((item, index) => {
+            const percent = (item.value / maxValue) * 100;
+            return (
+              <View key={item.label} style={styles.barChartColumn}>
+                <View style={styles.barChartBarWrapper}>
+                  {showValues && item.value > 0 && (
+                    <Text style={styles.barChartValue}>{formatNumber(item.value)}</Text>
+                  )}
+                  <View
+                    style={[
+                      styles.barChartBar,
+                      {
+                        height: `${Math.max(percent, 3)}%`,
+                        backgroundColor: item.color || CHART_COLORS.primary,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.barChartLabel} numberOfLines={1}>
+                  {item.label}
+                </Text>
+              </View>
+            );
+          })}
         </View>
-        <Text style={styles.conversionHelp}>
-          Pending = started − completed − abandoned. Not Started = scanned − started.
-        </Text>
       </View>
     );
   };
 
-  const renderDailyChart = () => {
+  // Line/Area chart for daily activity
+  const renderAreaChart = () => {
     if (!data?.dailyEvents || data.dailyEvents.length === 0) {
       return (
         <View style={styles.emptyState}>
@@ -320,21 +422,171 @@ export default function AdminDashboardScreen(_props: Props) {
 
     const maxCount = Math.max(...data.dailyEvents.map((d) => d.count), 1);
     const days = data.dailyEvents;
+    const chartHeight = isDesktop ? 180 : 120;
+
+    // Create SVG path for area chart (web)
+    const points = days.map((day, index) => {
+      const x = (index / (days.length - 1 || 1)) * 100;
+      const y = 100 - (day.count / maxCount) * 100;
+      return `${x},${y}`;
+    });
+
+    const linePath = `M ${points.join(' L ')}`;
+    const areaPath = `M 0,100 L ${points.join(' L ')} L 100,100 Z`;
 
     return (
-      <View>
-        <View style={styles.chartContainer}>
-          {days.map((day, index) => (
-            <View
-              key={day.day}
-              style={[styles.chartBar, { height: `${Math.max((day.count / maxCount) * 100, 3)}%` }]}
+      <View style={[styles.areaChartContainer, { height: chartHeight }]}>
+        {/* Y-axis labels */}
+        <View style={styles.areaChartYAxis}>
+          <Text style={styles.areaChartYLabel}>{formatNumber(maxCount)}</Text>
+          <Text style={styles.areaChartYLabel}>{formatNumber(Math.round(maxCount / 2))}</Text>
+          <Text style={styles.areaChartYLabel}>0</Text>
+        </View>
+
+        {/* Chart area */}
+        <View style={styles.areaChartMain}>
+          {/* Grid lines */}
+          <View style={styles.areaChartGrid}>
+            <View style={styles.areaChartGridLine} />
+            <View style={styles.areaChartGridLine} />
+            <View style={styles.areaChartGridLine} />
+          </View>
+
+          {/* SVG Chart */}
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            style={{
+              width: '100%',
+              height: '100%',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+            }}>
+            <defs>
+              <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor={CHART_COLORS.primary} stopOpacity="0.3" />
+                <stop offset="100%" stopColor={CHART_COLORS.primary} stopOpacity="0.05" />
+              </linearGradient>
+            </defs>
+            <path d={areaPath} fill="url(#areaGradient)" />
+            <path
+              d={linePath}
+              fill="none"
+              stroke={CHART_COLORS.primary}
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
             />
-          ))}
+          </svg>
+
+          {/* Data points on hover */}
+          <View style={styles.areaChartPoints}>
+            {days.map((day, index) => {
+              const leftPercent = `${(index / (days.length - 1 || 1)) * 100}%` as const;
+              const bottomPercent = `${(day.count / maxCount) * 100}%` as const;
+              return (
+                <View
+                  key={day.day}
+                  style={[
+                    styles.areaChartPoint,
+                    {
+                      left: leftPercent as `${number}%`,
+                      bottom: bottomPercent as `${number}%`,
+                    },
+                  ]}
+                />
+              );
+            })}
+          </View>
         </View>
-        <View style={styles.chartLabels}>
-          <Text style={styles.chartLabel}>{days[0]?.day?.slice(5) || ''}</Text>
-          <Text style={styles.chartLabel}>{days[days.length - 1]?.day?.slice(5) || ''}</Text>
+
+        {/* X-axis labels */}
+        <View style={styles.areaChartXAxis}>
+          {days.length > 0 && (
+            <>
+              <Text style={styles.areaChartXLabel}>{days[0]?.day?.slice(5) || ''}</Text>
+              {days.length > 2 && (
+                <Text style={styles.areaChartXLabel}>
+                  {days[Math.floor(days.length / 2)]?.day?.slice(5) || ''}
+                </Text>
+              )}
+              <Text style={styles.areaChartXLabel}>
+                {days[days.length - 1]?.day?.slice(5) || ''}
+              </Text>
+            </>
+          )}
         </View>
+      </View>
+    );
+  };
+
+  // Stat card component
+  const StatCard = ({
+    value,
+    label,
+    trend,
+    color,
+  }: {
+    value: string;
+    label: string;
+    trend?: 'up' | 'down' | null;
+    color?: string;
+  }) => (
+    <View
+      style={[responsiveStyles.statCard, color && { borderLeftColor: color, borderLeftWidth: 4 }]}>
+      <Text style={responsiveStyles.statCardValue}>{value}</Text>
+      <Text style={responsiveStyles.statCardLabel}>{label}</Text>
+    </View>
+  );
+
+  // Conversion funnel (enhanced)
+  const renderConversionFunnel = () => {
+    const scans = data?.joinFunnel?.qr_scanned ?? 0;
+    const started = data?.joinFunnel?.join_started ?? 0;
+    const completed = data?.joinFunnel?.join_completed ?? 0;
+    const abandoned = data?.joinFunnel?.abandoned ?? 0;
+
+    const steps = [
+      { label: 'QR Scanned', value: scans, color: CHART_COLORS.gray },
+      { label: 'Join Started', value: started, color: CHART_COLORS.primary },
+      { label: 'Completed', value: completed, color: CHART_COLORS.success },
+      { label: 'Abandoned', value: abandoned, color: CHART_COLORS.danger },
+    ];
+
+    const maxValue = Math.max(...steps.map((s) => s.value), 1);
+
+    return (
+      <View style={styles.funnelContainer}>
+        {steps.map((step, index) => {
+          const percent = (step.value / maxValue) * 100;
+          const rate =
+            index > 0 && steps[index - 1].value > 0
+              ? Math.round((step.value / steps[index - 1].value) * 100)
+              : 100;
+
+          return (
+            <View key={step.label} style={styles.funnelStep}>
+              <View style={styles.funnelStepHeader}>
+                <Text style={styles.funnelStepLabel}>{step.label}</Text>
+                <Text style={styles.funnelStepValue}>
+                  {formatNumber(step.value)}
+                  {index > 0 && <Text style={styles.funnelStepRate}> ({rate}%)</Text>}
+                </Text>
+              </View>
+              <View style={styles.funnelBarTrack}>
+                <View
+                  style={[
+                    styles.funnelBarFill,
+                    {
+                      width: `${Math.max(percent, 2)}%`,
+                      backgroundColor: step.color,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          );
+        })}
       </View>
     );
   };
@@ -360,7 +612,7 @@ export default function AdminDashboardScreen(_props: Props) {
           <Text style={[styles.loadingText, { marginTop: 16, marginBottom: 24 }]}>
             Please log in to view analytics
           </Text>
-          <Pressable style={styles.retryButton} onPress={login}>
+          <Pressable style={styles.retryButton} onPress={() => login()}>
             <Text style={styles.retryButtonText}>Log in with GitHub</Text>
           </Pressable>
         </View>
@@ -381,7 +633,7 @@ export default function AdminDashboardScreen(_props: Props) {
             Only administrators can view the analytics dashboard.
           </Text>
           <Text style={[styles.loadingText, { fontSize: 12, color: '#999' }]}>
-            Logged in as: {user.github_username}
+            Logged in as: {user.github_username || user.google_name || user.email}
           </Text>
         </View>
       </SafeAreaProvider>
@@ -399,6 +651,438 @@ export default function AdminDashboardScreen(_props: Props) {
     );
   }
 
+  // Desktop layout
+  if (isDesktop && data) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <ScrollView
+          style={responsiveStyles.container}
+          contentContainerStyle={responsiveStyles.scrollContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}>
+          {/* Header */}
+          <View style={responsiveStyles.header}>
+            <View style={responsiveStyles.headerLeft}>
+              <Text style={responsiveStyles.title}>Analytics Dashboard</Text>
+              <Text style={responsiveStyles.subtitle}>Data from the last {selectedDays} days</Text>
+            </View>
+            <View style={responsiveStyles.headerRight}>
+              <View style={responsiveStyles.periodSelector}>
+                {PERIOD_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option.days}
+                    style={[
+                      responsiveStyles.periodButton,
+                      selectedDays === option.days && responsiveStyles.periodButtonActive,
+                    ]}
+                    onPress={() => setSelectedDays(option.days)}>
+                    <Text
+                      style={[
+                        responsiveStyles.periodButtonText,
+                        selectedDays === option.days && responsiveStyles.periodButtonTextActive,
+                      ]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={responsiveStyles.exportButtons}>
+                <Pressable
+                  style={responsiveStyles.exportButton}
+                  onPress={() => handleExport('parties')}>
+                  <Text style={responsiveStyles.exportButtonText}>Export Parties</Text>
+                </Pressable>
+                <Pressable
+                  style={responsiveStyles.exportButton}
+                  onPress={() => handleExport('queues')}>
+                  <Text style={responsiveStyles.exportButtonText}>Export Queues</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+
+          {error && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+              <Pressable style={styles.retryButton} onPress={handleRefresh}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* KPI Row */}
+          <View style={responsiveStyles.kpiRow}>
+            <StatCard
+              value={formatNumber(data.queueStats?.total_queues)}
+              label="Total Queues"
+              color={CHART_COLORS.primary}
+            />
+            <StatCard
+              value={formatNumber(data.queueStats?.active_queues)}
+              label="Active Queues"
+              color={CHART_COLORS.success}
+            />
+            <StatCard
+              value={formatDuration(data.waitTimeStats?.avg_wait_ms)}
+              label="Avg Wait Time"
+              color={CHART_COLORS.warning}
+            />
+            <StatCard
+              value={formatNumber(data.waitTimeStats?.total_served)}
+              label="Total Served"
+              color={CHART_COLORS.success}
+            />
+            <StatCard
+              value={formatNumber(data.abandonmentStats?.total_left)}
+              label="Total Left"
+              color={CHART_COLORS.danger}
+            />
+            <StatCard
+              value={
+                data.pushStats?.nudges_sent
+                  ? `${Math.round((data.pushStats.nudges_acked / data.pushStats.nudges_sent) * 100)}%`
+                  : '-'
+              }
+              label="Push Ack Rate"
+              color={CHART_COLORS.purple}
+            />
+          </View>
+
+          {/* Main Grid */}
+          <View style={responsiveStyles.mainGrid}>
+            {/* Left Column - 2/3 width */}
+            <View style={responsiveStyles.mainColumn}>
+              {/* Daily Activity Chart */}
+              <View style={responsiveStyles.card}>
+                <Text style={responsiveStyles.cardTitle}>Daily Activity</Text>
+                {renderAreaChart()}
+              </View>
+
+              {/* Two column layout for charts */}
+              <View style={responsiveStyles.twoColumnRow}>
+                {/* Conversion Funnel */}
+                <View style={[responsiveStyles.card, { flex: 1 }]}>
+                  <Text style={responsiveStyles.cardTitle}>Conversion Funnel</Text>
+                  {renderConversionFunnel()}
+                </View>
+
+                {/* Party Outcomes Donut */}
+                <View style={[responsiveStyles.card, { flex: 1 }]}>
+                  <Text style={responsiveStyles.cardTitle}>Party Outcomes</Text>
+                  {renderDonutChart(
+                    (data.partyStats || []).map((stat) => ({
+                      label: getPartyStatusLabel(stat.status),
+                      value: stat.count,
+                      color: STATUS_COLORS[stat.status] || CHART_COLORS.gray,
+                    })),
+                    140
+                  )}
+                </View>
+              </View>
+
+              {/* Completion by Wait Time */}
+              {data.completionByWait && data.completionByWait.length > 0 && (
+                <View style={responsiveStyles.card}>
+                  <Text style={responsiveStyles.cardTitle}>Completion Rate by Wait Time</Text>
+                  {renderBarChart(
+                    data.completionByWait.map((bucket) => ({
+                      label:
+                        bucket.wait_bucket === 'under_5min'
+                          ? '< 5m'
+                          : bucket.wait_bucket === '5_to_15min'
+                            ? '5-15m'
+                            : bucket.wait_bucket === '15_to_30min'
+                              ? '15-30m'
+                              : '> 30m',
+                      value:
+                        bucket.total > 0 ? Math.round((bucket.served / bucket.total) * 100) : 0,
+                      color: CHART_COLORS.success,
+                    })),
+                    { height: 160 }
+                  )}
+                </View>
+              )}
+
+              {/* Queue Performance Table */}
+              {data.perQueueStats && data.perQueueStats.length > 0 && (
+                <View style={responsiveStyles.card}>
+                  <Text style={responsiveStyles.cardTitle}>Queue Performance</Text>
+                  <View style={responsiveStyles.table}>
+                    <View style={responsiveStyles.tableHeader}>
+                      <Text style={[responsiveStyles.tableHeaderCell, { flex: 2 }]}>Queue</Text>
+                      <Text style={responsiveStyles.tableHeaderCell}>Joined</Text>
+                      <Text style={responsiveStyles.tableHeaderCell}>Served</Text>
+                      <Text style={responsiveStyles.tableHeaderCell}>Left</Text>
+                      <Text style={responsiveStyles.tableHeaderCell}>Avg Wait</Text>
+                      <Text style={responsiveStyles.tableHeaderCell}>Rate</Text>
+                    </View>
+                    {data.perQueueStats.slice(0, 10).map((queue) => {
+                      const completionRate =
+                        queue.total_parties > 0
+                          ? Math.round((queue.served_count / queue.total_parties) * 100)
+                          : 0;
+                      return (
+                        <View key={queue.session_id} style={responsiveStyles.tableRow}>
+                          <View style={[responsiveStyles.tableCell, { flex: 2 }]}>
+                            <Text style={responsiveStyles.tableCellPrimary} numberOfLines={1}>
+                              {queue.event_name || queue.short_code}
+                            </Text>
+                            <Text style={responsiveStyles.tableCellSecondary}>
+                              {queue.short_code}
+                            </Text>
+                          </View>
+                          <Text style={responsiveStyles.tableCell}>{queue.total_parties}</Text>
+                          <Text style={responsiveStyles.tableCell}>{queue.served_count}</Text>
+                          <Text style={responsiveStyles.tableCell}>{queue.left_count}</Text>
+                          <Text style={responsiveStyles.tableCell}>
+                            {formatDuration(queue.avg_wait_ms)}
+                          </Text>
+                          <View style={responsiveStyles.tableCell}>
+                            <View style={responsiveStyles.rateBar}>
+                              <View
+                                style={[
+                                  responsiveStyles.rateBarFill,
+                                  {
+                                    width: `${completionRate}%`,
+                                    backgroundColor:
+                                      completionRate >= 70
+                                        ? CHART_COLORS.success
+                                        : completionRate >= 40
+                                          ? CHART_COLORS.warning
+                                          : CHART_COLORS.danger,
+                                  },
+                                ]}
+                              />
+                            </View>
+                            <Text style={responsiveStyles.rateText}>{completionRate}%</Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* Right Column - 1/3 width */}
+            <View style={responsiveStyles.sideColumn}>
+              {/* Host Actions */}
+              <View style={responsiveStyles.card}>
+                <Text style={responsiveStyles.cardTitle}>Host Actions</Text>
+                {renderBarChart(
+                  [
+                    {
+                      label: 'Created',
+                      value: data.hostActions?.queues_created ?? 0,
+                      color: CHART_COLORS.primary,
+                    },
+                    {
+                      label: 'Call Next',
+                      value: data.hostActions?.call_next ?? 0,
+                      color: CHART_COLORS.success,
+                    },
+                    {
+                      label: 'Call Specific',
+                      value: data.hostActions?.call_specific ?? 0,
+                      color: CHART_COLORS.warning,
+                    },
+                    {
+                      label: 'Closed',
+                      value: data.hostActions?.queues_closed ?? 0,
+                      color: CHART_COLORS.gray,
+                    },
+                  ],
+                  { horizontal: true }
+                )}
+              </View>
+
+              {/* Push Notifications */}
+              <View style={responsiveStyles.card}>
+                <Text style={responsiveStyles.cardTitle}>Push Notifications</Text>
+                {renderDonutChart(
+                  [
+                    {
+                      label: 'Granted',
+                      value: data.pushStats?.push_granted ?? 0,
+                      color: CHART_COLORS.success,
+                    },
+                    {
+                      label: 'Denied',
+                      value: data.pushStats?.push_denied ?? 0,
+                      color: CHART_COLORS.danger,
+                    },
+                    {
+                      label: 'Pending',
+                      value: Math.max(
+                        (data.pushStats?.prompts_shown ?? 0) -
+                          (data.pushStats?.push_granted ?? 0) -
+                          (data.pushStats?.push_denied ?? 0),
+                        0
+                      ),
+                      color: CHART_COLORS.gray,
+                    },
+                  ],
+                  100
+                )}
+              </View>
+
+              {/* Platform Breakdown */}
+              {data.platformBreakdown && data.platformBreakdown.length > 0 && (
+                <View style={responsiveStyles.card}>
+                  <Text style={responsiveStyles.cardTitle}>Platforms</Text>
+                  {renderDonutChart(
+                    data.platformBreakdown.map((p, i) => ({
+                      label:
+                        p.platform === 'ios' ? 'iOS' : p.platform === 'android' ? 'Android' : 'Web',
+                      value: p.count,
+                      color: [CHART_COLORS.primary, CHART_COLORS.success, CHART_COLORS.purple][
+                        i % 3
+                      ],
+                    })),
+                    100
+                  )}
+                </View>
+              )}
+
+              {/* Wait Time Stats */}
+              <View style={responsiveStyles.card}>
+                <Text style={responsiveStyles.cardTitle}>Wait Time Analysis</Text>
+                <View style={responsiveStyles.miniStats}>
+                  <View style={responsiveStyles.miniStatItem}>
+                    <Text style={responsiveStyles.miniStatValue}>
+                      {formatDuration(data.waitTimeStats?.avg_wait_ms)}
+                    </Text>
+                    <Text style={responsiveStyles.miniStatLabel}>Average</Text>
+                  </View>
+                  <View style={responsiveStyles.miniStatItem}>
+                    <Text style={responsiveStyles.miniStatValue}>
+                      {formatDuration(data.waitTimeStats?.min_wait_ms)}
+                    </Text>
+                    <Text style={responsiveStyles.miniStatLabel}>Minimum</Text>
+                  </View>
+                  <View style={responsiveStyles.miniStatItem}>
+                    <Text style={responsiveStyles.miniStatValue}>
+                      {formatDuration(data.waitTimeStats?.max_wait_ms)}
+                    </Text>
+                    <Text style={responsiveStyles.miniStatLabel}>Maximum</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* ETA Accuracy */}
+              {data.etaAccuracyStats && data.etaAccuracyStats.total_with_eta > 0 && (
+                <View style={responsiveStyles.card}>
+                  <Text style={responsiveStyles.cardTitle}>ETA Accuracy</Text>
+                  <View style={responsiveStyles.miniStats}>
+                    <View style={responsiveStyles.miniStatItem}>
+                      <Text style={responsiveStyles.miniStatValue}>
+                        {formatDuration(
+                          data.etaAccuracyStats.avg_error_ms
+                            ? Math.abs(data.etaAccuracyStats.avg_error_ms)
+                            : null
+                        )}
+                      </Text>
+                      <Text style={responsiveStyles.miniStatLabel}>Avg Error</Text>
+                    </View>
+                    <View style={responsiveStyles.miniStatItem}>
+                      <Text style={responsiveStyles.miniStatValue}>
+                        {Math.round(
+                          (data.etaAccuracyStats.within_5min /
+                            data.etaAccuracyStats.total_with_eta) *
+                            100
+                        )}
+                        %
+                      </Text>
+                      <Text style={responsiveStyles.miniStatLabel}>Within 5min</Text>
+                    </View>
+                  </View>
+                  {data.etaAccuracyStats.avg_bias_ms !== null && (
+                    <Text style={responsiveStyles.noteText}>
+                      {data.etaAccuracyStats.avg_bias_ms > 0
+                        ? `Estimates ${formatDuration(Math.abs(data.etaAccuracyStats.avg_bias_ms))} too short`
+                        : data.etaAccuracyStats.avg_bias_ms < 0
+                          ? `Estimates ${formatDuration(Math.abs(data.etaAccuracyStats.avg_bias_ms))} too long`
+                          : 'Estimates accurate on average'}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Trust Survey */}
+              {data.trustSurveyStats && data.trustSurveyStats.total_responses > 0 && (
+                <View style={responsiveStyles.card}>
+                  <Text style={responsiveStyles.cardTitle}>Trust Survey</Text>
+                  <View style={responsiveStyles.miniStats}>
+                    <View style={responsiveStyles.miniStatItem}>
+                      <Text style={responsiveStyles.miniStatValue}>
+                        {data.trustSurveyStats.total_responses > 0
+                          ? `${Math.round((data.trustSurveyStats.trust_yes / data.trustSurveyStats.total_responses) * 100)}%`
+                          : '-'}
+                      </Text>
+                      <Text style={responsiveStyles.miniStatLabel}>Said Accurate</Text>
+                    </View>
+                    <View style={responsiveStyles.miniStatItem}>
+                      <Text style={responsiveStyles.miniStatValue}>
+                        {formatNumber(data.trustSurveyStats.total_responses)}
+                      </Text>
+                      <Text style={responsiveStyles.miniStatLabel}>Responses</Text>
+                    </View>
+                  </View>
+                  {renderDonutChart(
+                    [
+                      {
+                        label: 'Looks good',
+                        value: data.trustSurveyStats.trust_yes,
+                        color: CHART_COLORS.success,
+                      },
+                      {
+                        label: 'Seems off',
+                        value: data.trustSurveyStats.trust_no,
+                        color: CHART_COLORS.danger,
+                      },
+                    ],
+                    100
+                  )}
+                </View>
+              )}
+
+              {/* Abandonment */}
+              <View style={responsiveStyles.card}>
+                <Text style={responsiveStyles.cardTitle}>Abandonment</Text>
+                {renderBarChart(
+                  [
+                    {
+                      label: '< 5min',
+                      value: data.abandonmentStats?.left_under_5min ?? 0,
+                      color: CHART_COLORS.success,
+                    },
+                    {
+                      label: '5-15min',
+                      value: data.abandonmentStats?.left_5_to_15min ?? 0,
+                      color: CHART_COLORS.warning,
+                    },
+                    {
+                      label: '> 15min',
+                      value: data.abandonmentStats?.left_over_15min ?? 0,
+                      color: CHART_COLORS.danger,
+                    },
+                  ],
+                  { horizontal: true }
+                )}
+                <View style={responsiveStyles.abandonmentNote}>
+                  <Text style={responsiveStyles.noteText}>
+                    Avg position at leave: #
+                    {Math.round(data.abandonmentStats?.avg_position_at_leave ?? 0)}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Mobile/Tablet layout (original with some enhancements)
   return (
     <SafeAreaProvider style={styles.safe}>
       <ScrollView
@@ -485,7 +1169,7 @@ export default function AdminDashboardScreen(_props: Props) {
             {/* Daily Activity Chart */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Daily Activity</Text>
-              <View style={styles.card}>{renderDailyChart()}</View>
+              <View style={styles.card}>{renderAreaChart()}</View>
             </View>
 
             {/* Conversion Funnel */}
@@ -753,6 +1437,43 @@ export default function AdminDashboardScreen(_props: Props) {
                           : 'Estimates are accurate on average'}
                     </Text>
                   )}
+                </View>
+              </View>
+            )}
+
+            {/* Trust Survey */}
+            {data.trustSurveyStats && data.trustSurveyStats.total_responses > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Trust Survey</Text>
+                <View style={styles.card}>
+                  <View style={styles.statsGrid}>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>
+                        {data.trustSurveyStats.total_responses > 0
+                          ? `${Math.round((data.trustSurveyStats.trust_yes / data.trustSurveyStats.total_responses) * 100)}%`
+                          : '-'}
+                      </Text>
+                      <Text style={styles.statLabel}>Said Accurate</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>
+                        {formatNumber(data.trustSurveyStats.trust_yes)}
+                      </Text>
+                      <Text style={styles.statLabel}>Looks Good</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>
+                        {formatNumber(data.trustSurveyStats.trust_no)}
+                      </Text>
+                      <Text style={styles.statLabel}>Seems Off</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>
+                        {formatNumber(data.trustSurveyStats.total_responses)}
+                      </Text>
+                      <Text style={styles.statLabel}>Total</Text>
+                    </View>
+                  </View>
                 </View>
               </View>
             )}

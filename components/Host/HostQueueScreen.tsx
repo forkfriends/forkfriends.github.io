@@ -11,6 +11,7 @@ import {
   Text,
   ToastAndroid,
   View,
+  useWindowDimensions,
   type GestureResponderEvent,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -23,10 +24,12 @@ import {
   closeQueueHost,
   HostParty,
   buildHostConnectUrl,
+  buildHostWsUrlFromCode,
 } from '../../lib/backend';
 import { Feather } from '@expo/vector-icons';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Lock, Users } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
+import { useAuth } from '../../contexts/AuthContext';
 import Timer from '../Timer';
 import { trackEvent } from '../../utils/analytics';
 import { generatePosterImage } from './posterGenerator';
@@ -82,6 +85,124 @@ const POLL_INTERVAL_MS = 10000; // Poll every 10 seconds
 const RECONNECT_DELAY_MS = 3000;
 
 export default function HostQueueScreen({ route, navigation }: Props) {
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 900;
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+
+  const {
+    code,
+    sessionId: initialSessionId,
+    wsUrl: initialWsUrl,
+    hostAuthToken: initialHostAuthToken,
+    joinUrl: initialJoinUrl,
+    eventName: initialEventName,
+    maxGuests: initialMaxGuests,
+    location: initialLocation,
+    contactInfo: initialContactInfo,
+    openTime: initialOpenTime,
+    closeTime: initialCloseTime,
+  } = route.params;
+
+  // State for recovered params (when missing from route params on page refresh)
+  const [recoveredParams, setRecoveredParams] = useState<{
+    sessionId?: string;
+    wsUrl?: string;
+    joinUrl?: string;
+    hostAuthToken?: string;
+    eventName?: string;
+    maxGuests?: number;
+    location?: string | null;
+    contactInfo?: string | null;
+    openTime?: string | null;
+    closeTime?: string | null;
+  } | null>(null);
+  const [isRecoveringParams, setIsRecoveringParams] = useState(!initialSessionId || !initialWsUrl);
+
+  // Effective params: use route params if available, otherwise use recovered values
+  const sessionId = initialSessionId || recoveredParams?.sessionId;
+  const wsUrl = initialWsUrl || recoveredParams?.wsUrl;
+  const joinUrl = initialJoinUrl || recoveredParams?.joinUrl;
+  const eventName = initialEventName || recoveredParams?.eventName;
+  const location = initialLocation ?? recoveredParams?.location;
+  const contactInfo = initialContactInfo ?? recoveredParams?.contactInfo;
+  const openTime = initialOpenTime ?? recoveredParams?.openTime;
+  const closeTime = initialCloseTime ?? recoveredParams?.closeTime;
+
+  // Recover params from storage when missing (e.g., page refresh)
+  useEffect(() => {
+    if ((initialSessionId && initialWsUrl) || !code) {
+      setIsRecoveringParams(false);
+      return;
+    }
+
+    // Wait for auth loading to complete before trying to recover
+    // This prevents a race condition where we try to fetch queues before knowing auth state
+    if (isAuthLoading) {
+      return;
+    }
+
+    const recoverParams = async () => {
+      try {
+        const activeQueues = await storage.getActiveQueues(isAuthenticated, true);
+        const activeQueue = activeQueues.find((q) => q.code === code);
+        if (activeQueue?.sessionId) {
+          // Try to get host auth token from dedicated storage as fallback
+          // This is important because the merged queue data from server may not include hostAuthToken
+          let hostAuthToken = activeQueue.hostAuthToken;
+          if (!hostAuthToken && activeQueue.sessionId) {
+            const storedToken = await storage.getHostAuth(activeQueue.sessionId);
+            if (storedToken) {
+              hostAuthToken = storedToken;
+            }
+          }
+          // Also try by code as another fallback
+          if (!hostAuthToken && code) {
+            const storedTokenByCode = await storage.getHostAuthByCode(code);
+            if (storedTokenByCode) {
+              hostAuthToken = storedTokenByCode;
+            }
+          }
+
+          // Build wsUrl from code if not present in storage (server-synced queues don't have wsUrl)
+          const wsUrl = activeQueue.wsUrl || buildHostWsUrlFromCode(code);
+
+          // Build joinUrl from code if not present in storage
+          const joinUrl =
+            activeQueue.joinUrl ||
+            (typeof window !== 'undefined' ? `${window.location.origin}/queue/${code}` : undefined);
+
+          // Set hostToken directly here to avoid race condition with isRecoveringParams
+          if (hostAuthToken) {
+            setHostToken(hostAuthToken);
+          }
+
+          setRecoveredParams({
+            sessionId: activeQueue.sessionId,
+            wsUrl,
+            joinUrl,
+            hostAuthToken,
+            eventName: activeQueue.eventName,
+            maxGuests: activeQueue.maxGuests,
+            location: activeQueue.location,
+            contactInfo: activeQueue.contactInfo,
+            openTime: activeQueue.openTime,
+            closeTime: activeQueue.closeTime,
+          });
+          setIsRecoveringParams(false);
+        } else {
+          // No stored queue found, redirect to dashboard
+          console.warn('No queue found in storage for code:', code);
+          navigation.replace('HostDashboardScreen');
+        }
+      } catch (error) {
+        console.error('Failed to recover queue params from storage:', error);
+        navigation.replace('HostDashboardScreen');
+      }
+    };
+
+    void recoverParams();
+  }, [code, initialSessionId, initialWsUrl, navigation, isAuthenticated, isAuthLoading]);
+
   // Override the back button behavior to go to HomeScreen
   useEffect(() => {
     navigation.setOptions({
@@ -102,23 +223,14 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     });
   }, [navigation]);
 
-  const {
-    code,
-    sessionId,
-    wsUrl,
-    hostAuthToken: initialHostAuthToken,
-    joinUrl,
-    eventName,
-    maxGuests: initialMaxGuests,
-    location,
-    contactInfo,
-    openTime,
-    closeTime,
-  } = route.params;
-  const storageKey = `queueup-host-auth:${sessionId}`;
+  const storageKey = sessionId ? `queueup-host-auth:${sessionId}` : '';
+  const storageCodeKey = code ? `queueup-host-auth-code:${code}` : '';
 
   const displayEventName = eventName?.trim() || null;
-  const scheduleLine = useMemo(() => formatScheduleLine(openTime, closeTime), [openTime, closeTime]);
+  const scheduleLine = useMemo(
+    () => formatScheduleLine(openTime, closeTime),
+    [openTime, closeTime]
+  );
   const [capacity, setCapacity] = useState<number | null>(
     typeof initialMaxGuests === 'number' ? initialMaxGuests : null
   );
@@ -128,7 +240,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       return initialHostAuthToken;
     }
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      return window.sessionStorage.getItem(storageKey) ?? undefined;
+      // Prefer durable localStorage (used by storage.setHostAuth), fall back to sessionStorage
+      const fromLocal = storageKey ? window.localStorage.getItem(storageKey) : null;
+      const fromLocalCode = storageCodeKey ? window.localStorage.getItem(storageCodeKey) : null;
+      const fromSession = storageKey ? window.sessionStorage.getItem(storageKey) : null;
+      if (fromLocal) return fromLocal;
+      if (fromLocalCode) return fromLocalCode;
+      if (fromSession) return fromSession;
     }
     return undefined;
   });
@@ -163,6 +281,33 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     hasInitializedQueue.current = false;
   }, [code, sessionId]);
 
+  // If we were navigated here without a host token (e.g., after logout/login),
+  // try to recover it from persistent storage using the sessionId.
+  useEffect(() => {
+    if (hostToken || !sessionId) return;
+
+    (async () => {
+      try {
+        const stored = await storage.getHostAuth(sessionId);
+        const storedByCode = stored ? null : await storage.getHostAuthByCode(code);
+        if (stored) {
+          setHostToken(stored);
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.sessionStorage.setItem(storageKey, stored);
+          }
+        } else if (storedByCode) {
+          setHostToken(storedByCode);
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            if (storageKey) window.sessionStorage.setItem(storageKey, storedByCode);
+            if (storageCodeKey) window.sessionStorage.setItem(storageCodeKey, storedByCode);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to recover host auth from storage', err);
+      }
+    })();
+  }, [hostToken, sessionId, storageKey, storageCodeKey, code]);
+
   useEffect(() => {
     if (!initialHostAuthToken) {
       return;
@@ -170,6 +315,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     setHostToken(initialHostAuthToken);
     // Persist host auth and queue info for cross-platform return-to-queue buttons
     (async () => {
+      if (!sessionId || !wsUrl) return;
       try {
         await storage.setHostAuth(sessionId, initialHostAuthToken);
         await storage.setActiveQueue({
@@ -190,13 +336,27 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         // Ignore storage errors (e.g. private mode)
       }
     })();
-  }, [initialHostAuthToken, storageKey, code, sessionId, wsUrl, joinUrl, eventName, initialMaxGuests]);
+  }, [
+    initialHostAuthToken,
+    storageKey,
+    code,
+    sessionId,
+    wsUrl,
+    joinUrl,
+    eventName,
+    initialMaxGuests,
+  ]);
 
   const snapshotUrl = useMemo(() => {
-    const baseUrl = wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+    if (!wsUrl) return null;
+    const baseUrl = wsUrl
+      .replace('/connect', '/snapshot')
+      .replace('wss://', 'https://')
+      .replace('ws://', 'http://');
     return baseUrl;
   }, [wsUrl]);
   const hasHostAuth = Boolean(hostToken);
+  const recoveringHostAuth = !hasHostAuth && Boolean(sessionId);
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeout.current) {
@@ -241,7 +401,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, []);
 
   const poll = useCallback(async () => {
-    if (!hasHostAuth || !hostToken) {
+    if (!hasHostAuth || !hostToken || !snapshotUrl) {
       return;
     }
 
@@ -311,7 +471,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const startPolling = useCallback(() => {
     if (!hasHostAuth) {
       setConnectionState('closed');
-      setConnectionError('Missing host authentication. Reopen the host controls on the device that created this queue.');
+      setConnectionError(
+        'Missing host authentication. Reopen the host controls on the device that created this queue.'
+      );
       setConnectionErrorModalVisible(true);
       return;
     }
@@ -340,9 +502,17 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, [hasHostAuth, snapshotUrl, poll]);
 
   useEffect(() => {
+    // Don't show auth error while still recovering params from storage or host auth
+    // Also pause if the user has logged out
+    if (isRecoveringParams || recoveringHostAuth || !isAuthenticated) {
+      return;
+    }
+
     if (!hasHostAuth) {
       setConnectionState('closed');
-      setConnectionError('Missing host authentication. Reopen the host controls on the device that created this queue.');
+      setConnectionError(
+        'Missing host authentication. Reopen the host controls on the device that created this queue.'
+      );
       setConnectionErrorModalVisible(true);
       return;
     }
@@ -351,10 +521,31 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       clearReconnectTimeout();
       stopPolling();
     };
-  }, [startPolling, clearReconnectTimeout, stopPolling, hasHostAuth]);
+  }, [
+    startPolling,
+    clearReconnectTimeout,
+    stopPolling,
+    hasHostAuth,
+    isRecoveringParams,
+    recoveringHostAuth,
+    isAuthenticated,
+  ]);
 
   const queueCount = queue.length;
-  const shareableLink = joinUrl ?? null;
+  const shareableLink = useMemo(() => {
+    if (joinUrl) return joinUrl;
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}/queue/${code}`;
+    }
+    return null;
+  }, [joinUrl, code]);
+  // QR code URL includes src=qr param for tracking scans vs manual entry
+  const qrCodeLink = useMemo(() => {
+    if (!shareableLink) return null;
+    const url = new URL(shareableLink);
+    url.searchParams.set('src', 'qr');
+    return url.toString();
+  }, [shareableLink]);
   const buildPosterDetails = useCallback(() => {
     const lines: string[] = [];
     if (displayEventName) {
@@ -369,8 +560,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       lines.push(location.trim());
     }
     const trimmedContact = typeof contactInfo === 'string' ? contactInfo.trim() : '';
-    const isMeaningfulContact = trimmedContact.length > 0 && 
-      !/^(no|n\/a|none|na|-|--)$/i.test(trimmedContact);
+    const isMeaningfulContact =
+      trimmedContact.length > 0 && !/^(no|n\/a|none|na|-|--)$/i.test(trimmedContact);
     if (isMeaningfulContact) {
       lines.push(trimmedContact);
     } else if (typeof capacity === 'number') {
@@ -431,7 +622,16 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setActionLoading(false);
       }
     },
-    [actionLoading, code, hasHostAuth, hostToken, nowServing?.id, poll, queue.length, trackHostAction]
+    [
+      actionLoading,
+      code,
+      hasHostAuth,
+      hostToken,
+      nowServing?.id,
+      poll,
+      queue.length,
+      trackHostAction,
+    ]
   );
 
   const advanceSpecific = useCallback(
@@ -451,17 +651,17 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     try {
       await Clipboard.setStringAsync(code);
       setCodeCopied(true);
-      
+
       // Clear any existing timeout
       if (copyTimeoutRef.current) {
         clearTimeout(copyTimeoutRef.current);
       }
-      
+
       // Reset the icon back to copy after 3 seconds
       copyTimeoutRef.current = setTimeout(() => {
         setCodeCopied(false);
       }, 3000);
-      
+
       if (Platform.OS === 'android') {
         ToastAndroid.show('Queue code copied', ToastAndroid.SHORT);
       } else {
@@ -482,7 +682,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     };
   }, []);
 
-
   const handleGeneratePoster = useCallback(
     async (mode: 'color' | 'bw', forDownload: boolean = true) => {
       if (!canGeneratePoster || typeof window === 'undefined') {
@@ -502,11 +701,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       try {
         const blob = await generatePosterImage({
           slug: code,
-          joinUrl: shareableLink ?? undefined,
+          joinUrl: qrCodeLink ?? undefined,
           detailLines: buildPosterDetails(),
           blackWhiteMode: mode === 'bw',
         });
-        
+
         if (forDownload) {
           const objectUrl = URL.createObjectURL(blob);
           const link = doc.createElement('a');
@@ -528,7 +727,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           const objectUrl = URL.createObjectURL(blob);
           setPosterImageUrl(objectUrl);
         }
-        
+
         return blob;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to generate poster';
@@ -539,7 +738,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setPosterGenerating(false);
       }
     },
-    [buildPosterDetails, canGeneratePoster, code, posterModeLoading, shareableLink, trackHostAction]
+    [buildPosterDetails, canGeneratePoster, code, posterModeLoading, qrCodeLink, trackHostAction]
   );
 
   const handleShare = useCallback(async () => {
@@ -604,12 +803,12 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       link.click();
       doc.body.removeChild(link);
       URL.revokeObjectURL(objectUrl);
-        Alert.alert('Poster ready', 'Check your downloads folder for the PNG file.');
-        trackHostAction('qr_saved', {
-          platform: Platform.OS,
-          method: 'poster_download',
-          mode: posterBlackWhite ? 'bw' : 'color',
-        });
+      Alert.alert('Poster ready', 'Check your downloads folder for the PNG file.');
+      trackHostAction('qr_saved', {
+        platform: Platform.OS,
+        method: 'poster_download',
+        mode: posterBlackWhite ? 'bw' : 'color',
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to download poster';
       Alert.alert('Download failed', message);
@@ -646,7 +845,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       }
       try {
         // Also remove stored host auth for this session
-        await storage.removeHostAuth(sessionId);
+        if (sessionId) {
+          await storage.removeHostAuth(sessionId);
+        }
       } catch (err) {
         console.warn('Failed to remove host auth from storage after close', err);
       }
@@ -716,6 +917,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     poll();
   }, [poll]);
 
+  // If auth state drops while on this screen, send user home to avoid stale host controls
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigation.replace('HomeScreen');
+    }
+  }, [isAuthenticated, navigation]);
+
   const renderQueueList = () => {
     if (queueCount === 0) {
       return (
@@ -770,9 +978,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         {typeof capacity === 'number' ? (
           <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
         ) : null}
-        {scheduleLine ? (
-          <Text style={styles.headerLine}>{scheduleLine}</Text>
-        ) : null}
+        {scheduleLine ? <Text style={styles.headerLine}>{scheduleLine}</Text> : null}
         <View style={styles.headerCodeRow}>
           <Text style={styles.headerLine}>Queue code:</Text>
           <Text style={styles.headerCodeValue}>{code}</Text>
@@ -816,9 +1022,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
                 )}
               </Pressable>
             ) : null}
-            <Pressable
-              style={styles.posterButtonSecondary}
-              onPress={handleShare}>
+            <Pressable style={styles.posterButtonSecondary} onPress={handleShare}>
               <Feather name="share-2" size={18} color="#111" />
               <Text style={styles.posterButtonSecondaryText}>Share</Text>
             </Pressable>
@@ -842,7 +1046,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         ) : null}
         <View style={styles.queueActionsRow}>
           <Pressable
-            style={[styles.primaryButton, disabledAdvance ? styles.primaryButtonDisabled : undefined]}
+            style={[
+              styles.primaryButton,
+              disabledAdvance ? styles.primaryButtonDisabled : undefined,
+            ]}
             disabled={disabledAdvance}
             onPress={advanceCurrent}>
             {actionLoading ? (
@@ -955,9 +1162,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
                   </View>
                   <Text style={styles.posterModalCheckboxLabel}>Black & White</Text>
                 </Pressable>
-                <Pressable
-                  style={styles.posterModalDownloadButton}
-                  onPress={handleDownloadPoster}>
+                <Pressable style={styles.posterModalDownloadButton} onPress={handleDownloadPoster}>
                   <Feather name="download" size={18} color="#fff" />
                   <Text style={styles.posterModalDownloadText}>Download</Text>
                 </Pressable>
@@ -979,15 +1184,14 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         <View style={styles.webModalCard}>
           <Text style={styles.webModalTitle}>Connection Error</Text>
           <Text style={styles.webModalMessage}>
-            {connectionError || 'Unable to connect to the server. Please check your internet connection and try again.'}
+            {connectionError ||
+              'Unable to connect to the server. Please check your internet connection and try again.'}
           </Text>
           <View style={styles.webModalActions}>
             <Pressable style={styles.webModalCancelButton} onPress={handleGoHome}>
               <Text style={styles.webModalCancelText}>Go Home</Text>
             </Pressable>
-            <Pressable
-              style={styles.webModalConfirmButton}
-              onPress={handleRetryConnection}>
+            <Pressable style={styles.webModalConfirmButton} onPress={handleRetryConnection}>
               <Text style={styles.webModalConfirmText}>Retry</Text>
             </Pressable>
           </View>
@@ -996,6 +1200,220 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     </Modal>
   );
 
+  const renderDesktopQueueList = () => {
+    if (queueCount === 0) {
+      return (
+        <View style={styles.desktopEmptyState}>
+          {closed ? (
+            <Lock style={styles.desktopEmptyStateIcon as never} size={56} strokeWidth={2.2} />
+          ) : (
+            <Users style={styles.desktopEmptyStateIcon as never} size={56} strokeWidth={2.2} />
+          )}
+          <Text style={styles.desktopEmptyStateText}>
+            {closed
+              ? 'Queue has been closed.'
+              : 'Queue is empty. Guests will appear here as they join.'}
+          </Text>
+        </View>
+      );
+    }
+
+    return queue.map((party, index) => {
+      const isLast = index === queueCount - 1;
+      return (
+        <View
+          key={party.id}
+          style={[styles.desktopQueueItem, isLast ? styles.desktopQueueItemLast : undefined]}>
+          <View style={styles.desktopQueueItemPosition}>
+            <Text style={styles.desktopQueueItemPositionText}>{index + 1}</Text>
+          </View>
+          <View style={styles.desktopQueueItemInfo}>
+            <Text style={styles.queueItemName}>
+              {party.name?.trim() || 'Guest'} {party.size ? `(${party.size})` : ''}
+            </Text>
+            <Text style={styles.queueItemMeta}>
+              {party.status === 'waiting' ? 'Waiting' : 'Called'} ·{' '}
+              {party.nearby ? 'Nearby' : 'Not nearby'}
+            </Text>
+          </View>
+          <Pressable
+            style={styles.queueItemButton}
+            onPress={() => advanceSpecific(party.id)}
+            disabled={!hasHostAuth || actionLoading || closed}>
+            {actionLoading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.queueItemButtonText}>Call</Text>
+            )}
+          </Pressable>
+        </View>
+      );
+    });
+  };
+
+  const renderControlsPanel = () => (
+    <View style={styles.desktopStickyControls}>
+      <View style={styles.headerCard}>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>Host Console</Text>
+          <Text style={[styles.statusBadge, closed ? styles.statusClosed : styles.statusActive]}>
+            {closed ? 'Closed' : 'Active'}
+          </Text>
+        </View>
+        {displayEventName ? (
+          <Text style={styles.headerEvent} numberOfLines={2} ellipsizeMode="tail">
+            {displayEventName}
+          </Text>
+        ) : null}
+        {typeof capacity === 'number' ? (
+          <Text style={styles.headerLine}>Guest capacity: {capacity}</Text>
+        ) : null}
+        {scheduleLine ? <Text style={styles.headerLine}>{scheduleLine}</Text> : null}
+        <View style={styles.headerCodeRow}>
+          <Text style={styles.headerLine}>Queue code:</Text>
+          <Text style={styles.headerCodeValue}>{code}</Text>
+          <Pressable
+            style={styles.headerCopyButton}
+            onPress={handleCopyCode}
+            accessibilityRole="button"
+            accessibilityLabel="Copy queue code to clipboard">
+            {codeCopied ? (
+              <Feather name="check" color="#222" size={14} />
+            ) : (
+              <Feather name="copy" color="#222" size={14} />
+            )}
+          </Pressable>
+        </View>
+        {!hasHostAuth ? (
+          <Text style={styles.connectionText}>
+            Host authentication token missing. Create a queue on this device to control it.
+          </Text>
+        ) : null}
+        {shareableLink ? (
+          <View style={styles.posterButtons}>
+            {canGeneratePoster ? (
+              <Pressable
+                style={[
+                  styles.posterButton,
+                  posterGenerating ? styles.posterButtonDisabled : undefined,
+                ]}
+                onPress={handleViewQrCode}
+                disabled={posterGenerating}>
+                {posterGenerating ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.posterButtonText}>View QR Code</Text>
+                )}
+              </Pressable>
+            ) : null}
+            <Pressable style={styles.posterButtonSecondary} onPress={handleShare}>
+              <Feather name="share-2" size={18} color="#111" />
+              <Text style={styles.posterButtonSecondaryText}>Share</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.nowServingCard}>
+        <Text style={styles.nowServingHeading}>Now Serving</Text>
+        <Text style={styles.nowServingValue}>
+          {nowServing
+            ? `${nowServing.name?.trim() || 'Guest'}${
+                nowServing.size ? ` (${nowServing.size})` : ''
+              }`
+            : 'No party currently called.'}
+        </Text>
+        {nowServing ? (
+          <View style={styles.timerRow}>
+            <Timer targetTimestamp={callDeadline ?? null} label="Time left" compact />
+          </View>
+        ) : null}
+        <View style={styles.queueActionsRow}>
+          <Pressable
+            style={[
+              styles.primaryButton,
+              disabledAdvance ? styles.primaryButtonDisabled : undefined,
+            ]}
+            disabled={disabledAdvance}
+            onPress={advanceCurrent}>
+            {actionLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>
+                {nowServing ? 'Mark Served & Call Next' : 'Call First Party'}
+              </Text>
+            )}
+          </Pressable>
+
+          <Pressable
+            style={styles.destructiveButton}
+            disabled={disabledClose}
+            onPress={handleCloseQueue}>
+            {closeLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Close Queue</Text>
+            )}
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderQueuePanel = () => (
+    <View style={styles.desktopQueueCard}>
+      <View style={styles.desktopQueueHeader}>
+        <Text style={styles.desktopQueueTitle}>Queue</Text>
+        <Text style={styles.desktopQueueCount}>
+          {queueCount} {queueCount === 1 ? 'party' : 'parties'}
+        </Text>
+      </View>
+      <ScrollView style={styles.desktopQueueList} contentContainerStyle={{ flexGrow: 1 }}>
+        {renderDesktopQueueList()}
+      </ScrollView>
+    </View>
+  );
+
+  const modals = (
+    <>
+      {webCloseModal}
+      {posterModal}
+      {connectionErrorModal}
+    </>
+  );
+
+  // Desktop layout
+  if (isDesktop) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <ScrollView
+          contentContainerStyle={styles.desktopContainer}
+          style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled">
+          {/* Left column - Controls */}
+          <View style={styles.desktopControlsColumn}>{renderControlsPanel()}</View>
+
+          {/* Right column - Queue */}
+          <View style={styles.desktopQueueColumn}>{renderQueuePanel()}</View>
+        </ScrollView>
+        {modals}
+      </SafeAreaProvider>
+    );
+  }
+
+  // Show loading state while recovering params from storage or waiting for auth
+  if (isRecoveringParams || isAuthLoading) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#1f6feb" />
+          <Text style={{ marginTop: 16, color: '#586069' }}>Loading queue...</Text>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
+
+  // Mobile layout
   return (
     <SafeAreaProvider style={styles.safe}>
       <ScrollView
@@ -1004,9 +1422,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         keyboardShouldPersistTaps="handled">
         {content}
       </ScrollView>
-      {webCloseModal}
-      {posterModal}
-      {connectionErrorModal}
+      {modals}
     </SafeAreaProvider>
   );
 }

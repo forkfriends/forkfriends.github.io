@@ -9,6 +9,7 @@ import {
   Pressable,
   ActivityIndicator,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -17,10 +18,21 @@ import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'ex
 import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
-import { buildGuestConnectUrl, joinQueue, leaveQueue, getVapidPublicKey, savePushSubscription, API_BASE_URL, type PushSubscriptionParams } from '../../lib/backend';
+import {
+  buildGuestConnectUrl,
+  joinQueue,
+  leaveQueue,
+  getVapidPublicKey,
+  savePushSubscription,
+  API_BASE_URL,
+  type PushSubscriptionParams,
+  type JoinQueueError,
+} from '../../lib/backend';
 import { trackEvent } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import { useModal } from '../../contexts/ModalContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { ArrowLeft, Bell, BellRing, Smartphone, Users } from 'lucide-react-native';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -32,6 +44,9 @@ const ANALYTICS_SCREEN = 'join_queue';
 
 export default function JoinQueueScreen({ navigation, route }: Props) {
   const { showModal } = useModal();
+  const { login } = useAuth();
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 900;
   const routeCode =
     route.params?.code && route.params.code.trim().length > 0
       ? route.params.code.trim().toUpperCase().slice(-6)
@@ -78,6 +93,30 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     setKey((current) => (current === normalized ? current : normalized));
   }, [route.params?.code, inQueue]);
 
+  // Track QR code scans when src=qr parameter is present in URL
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const src = params.get('src');
+      if (src === 'qr' && routeCode) {
+        void trackEvent('qr_scanned', {
+          queueCode: routeCode,
+          props: { screen: ANALYTICS_SCREEN, method: 'camera_scan' },
+        });
+        // Clean up URL to remove src param (optional, prevents duplicate tracking on refresh)
+        params.delete('src');
+        const newSearch = params.toString();
+        const newUrl = `${window.location.pathname}${newSearch ? `?${newSearch}` : ''}`;
+        window.history.replaceState({}, '', newUrl);
+      }
+    } catch {
+      // Ignore URL parsing errors
+    }
+  }, [routeCode]);
+
   const onSubmit = async () => {
     if (loading) return;
     if (inQueue) {
@@ -99,7 +138,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     // Check if already in this specific queue
     try {
       const joinedQueues = await storage.getJoinedQueues();
-      const alreadyJoined = joinedQueues.find(q => q.code === trimmed);
+      const alreadyJoined = joinedQueues.find((q) => q.code === trimmed);
       if (alreadyJoined) {
         showModal({
           title: 'Already in this queue',
@@ -180,7 +219,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           sessionId: joinResult.sessionId ?? '',
           partyId: joinResult.partyId,
           eventName: joinResult.eventName,
-          joinedAt: Date.now()
+          joinedAt: Date.now(),
         });
       } catch (storageError) {
         console.warn('Failed to store joined queue info', storageError);
@@ -200,10 +239,31 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       });
       return;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error joining queue';
+      const joinError = error as JoinQueueError;
+      const message = joinError.message || 'Unknown error joining queue';
 
-      // Check if it's a Turnstile verification error
-      if (message.includes('Turnstile verification') || message.includes('verification required')) {
+      // Check if queue requires authentication
+      if (joinError.requiresAuth) {
+        showModal({
+          title: 'Login Required',
+          message: 'This queue requires you to sign in before joining.',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', onPress: () => {} },
+            {
+              text: 'Sign In',
+              onPress: () => {
+                // Build the return URL to come back to this join screen with the code
+                const returnTo = `/join/${trimmed}`;
+                login('github', { returnTo });
+              },
+            },
+          ],
+        });
+      } else if (
+        message.includes('Turnstile verification') ||
+        message.includes('verification required')
+      ) {
+        // Check if it's a Turnstile verification error
         showModal({
           title: 'Verification Required',
           message: 'Please complete the Cloudflare security check above before joining the queue.',
@@ -212,7 +272,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         // Check storage to navigate to existing queue
         try {
           const joinedQueues = await storage.getJoinedQueues();
-          const alreadyJoined = joinedQueues.find(q => q.code === trimmed);
+          const alreadyJoined = joinedQueues.find((q) => q.code === trimmed);
           if (alreadyJoined) {
             showModal({
               title: 'Already in this queue',
@@ -350,53 +410,59 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   const snapshotUrl = useMemo(() => {
     if (!joinedCode || !partyId) return null;
     const wsUrl = buildGuestConnectUrl(joinedCode, partyId);
-    return wsUrl.replace('/connect', '/snapshot').replace('wss://', 'https://').replace('ws://', 'http://');
+    return wsUrl
+      .replace('/connect', '/snapshot')
+      .replace('wss://', 'https://')
+      .replace('ws://', 'http://');
   }, [joinedCode, partyId]);
 
-  const handleSnapshot = useCallback((data: Record<string, unknown>) => {
-    try {
-      switch (data.type) {
-        case 'position': {
-          const position = Number(data.position);
-          const aheadCount = Number(data.aheadCount);
-          if (!Number.isNaN(position)) {
-            setResultText(
-              aheadCount >= 0
-                ? `You're number ${position} in line. ${aheadCount} ${
-                    aheadCount === 1 ? 'party' : 'parties'
-                  } ahead of you.`
-                : `You're number ${position} in line.`
-            );
+  const handleSnapshot = useCallback(
+    (data: Record<string, unknown>) => {
+      try {
+        switch (data.type) {
+          case 'position': {
+            const position = Number(data.position);
+            const aheadCount = Number(data.aheadCount);
+            if (!Number.isNaN(position)) {
+              setResultText(
+                aheadCount >= 0
+                  ? `You're number ${position} in line. ${aheadCount} ${
+                      aheadCount === 1 ? 'party' : 'parties'
+                    } ahead of you.`
+                  : `You're number ${position} in line.`
+              );
+            }
+            break;
           }
-          break;
+          case 'called': {
+            setResultText("You're being served now! Please head to the host.");
+            break;
+          }
+          case 'removed': {
+            const reason = data.reason;
+            const reasonMessages: Record<string, string> = {
+              served: 'All set! You have been marked as served.',
+              no_show: "We couldn't reach you, so you were removed from the queue.",
+              kicked: 'The host removed you from the queue.',
+              closed: 'Queue closed. Thanks for your patience!',
+            };
+            const message = reasonMessages[reason as string] ?? 'You have left the queue.';
+            resetSession(message);
+            break;
+          }
+          case 'closed': {
+            resetSession('Queue closed by the host. Thanks for waiting with us!');
+            break;
+          }
+          default:
+            break;
         }
-        case 'called': {
-          setResultText("You're being served now! Please head to the host.");
-          break;
-        }
-        case 'removed': {
-          const reason = data.reason;
-          const reasonMessages: Record<string, string> = {
-            served: 'All set! You have been marked as served.',
-            no_show: "We couldn't reach you, so you were removed from the queue.",
-            kicked: 'The host removed you from the queue.',
-            closed: 'Queue closed. Thanks for your patience!',
-          };
-          const message = reasonMessages[reason as string] ?? 'You have left the queue.';
-          resetSession(message);
-          break;
-        }
-        case 'closed': {
-          resetSession('Queue closed by the host. Thanks for waiting with us!');
-          break;
-        }
-        default:
-          break;
+      } catch (err) {
+        console.warn('Failed to parse guest snapshot payload', err);
       }
-    } catch (err) {
-      console.warn('Failed to parse guest snapshot payload', err);
-    }
-  }, [resetSession]);
+    },
+    [resetSession]
+  );
 
   const poll = useCallback(async () => {
     if (!snapshotUrl) {
@@ -477,7 +543,11 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
   }, [joinedCode, partyId, clearReconnect, stopPolling, startPolling]);
 
   const enablePush = useCallback(
-    async (options?: { sessionOverride?: string | null; partyOverride?: string | null; silent?: boolean }) => {
+    async (options?: {
+      sessionOverride?: string | null;
+      partyOverride?: string | null;
+      silent?: boolean;
+    }) => {
       if (Platform.OS !== 'web') {
         return;
       }
@@ -534,7 +604,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         }
         const b64ToU8 = (b64: string) => {
           try {
-            return Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+            return Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
+              c.charCodeAt(0)
+            );
           } catch (error) {
             throw new Error('Invalid VAPID public key format');
           }
@@ -702,11 +774,12 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     return (
       <Pressable
         style={[styles.pushButton, pushReady && styles.pushButtonActive]}
-        onPress={() => void enablePush()}
-      >
-        <Text style={[styles.pushIcon, pushReady && styles.pushIconActive]}>
-          {pushReady ? '🔔✓' : '🔔'}
-        </Text>
+        onPress={() => void enablePush()}>
+        {pushReady ? (
+          <BellRing style={styles.pushIcon as never} size={18} strokeWidth={2.2} />
+        ) : (
+          <Bell style={styles.pushIcon as never} size={18} strokeWidth={2.2} />
+        )}
         <Text style={[styles.pushButtonText, pushReady && styles.pushButtonTextActive]}>
           {pushReady ? 'Notifications on' : 'Enable notifications'}
         </Text>
@@ -767,135 +840,182 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     </Modal>
   ) : null;
 
-  return (
-    <SafeAreaProvider style={styles.safe}>
-      <KeyboardAvoidingView
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
-        style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <Text style={styles.title}>Join Queue</Text>
+  const renderFormFields = () => (
+    <>
+      <Text style={styles.label}>Enter Key</Text>
+      <TextInput
+        placeholder="Value"
+        value={key}
+        onChangeText={setKey}
+        style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
+        autoCapitalize="none"
+        autoCorrect={false}
+        editable={!inQueue}
+        returnKeyType="done"
+      />
+      <Pressable style={styles.scanButton} onPress={handleOpenScanner}>
+        <Text style={styles.scanButtonText}>Scan QR Code</Text>
+      </Pressable>
 
-          <View style={styles.card}>
-            <Text style={styles.label}>Enter Key</Text>
-            <TextInput
-              placeholder="Value"
-              value={key}
-              onChangeText={setKey}
-              style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!inQueue}
-              returnKeyType="done"
-            />
-            <Pressable style={styles.scanButton} onPress={handleOpenScanner}>
-              <Text style={styles.scanButtonText}>Scan QR Code</Text>
-            </Pressable>
+      <Text style={styles.label}>Your Name</Text>
+      <TextInput
+        placeholder="(optional)"
+        value={name}
+        onChangeText={setName}
+        style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
+        editable={!inQueue}
+        returnKeyType="next"
+      />
 
-            <Text style={styles.label}>Your Name</Text>
-            <TextInput
-              placeholder="(optional)"
-              value={name}
-              onChangeText={setName}
-              style={[styles.input, inQueue ? styles.inputDisabled : undefined]}
-              editable={!inQueue}
-              returnKeyType="next"
-            />
+      <Text style={styles.label}>Party Size</Text>
+      <View style={styles.sliderRow}>
+        <Text style={styles.sliderValue}>{partySize}</Text>
+        <Text style={styles.sliderHint}>guests</Text>
+      </View>
+      <Slider
+        style={styles.slider}
+        minimumValue={MIN_QUEUE_SIZE}
+        maximumValue={MAX_QUEUE_SIZE}
+        step={1}
+        value={partySize}
+        minimumTrackTintColor="#1f6feb"
+        maximumTrackTintColor="#d0d7de"
+        thumbTintColor="#1f6feb"
+        onValueChange={(value) => setPartySize(Math.round(value))}
+      />
 
-            <Text style={styles.label}>Party Size</Text>
-            <View style={styles.sliderRow}>
-              <Text style={styles.sliderValue}>{partySize}</Text>
-              <Text style={styles.sliderHint}>guests</Text>
-            </View>
-            <Slider
-              style={styles.slider}
-              minimumValue={MIN_QUEUE_SIZE}
-              maximumValue={MAX_QUEUE_SIZE}
-              step={1}
-              value={partySize}
-              minimumTrackTintColor="#1f6feb"
-              maximumTrackTintColor="#d0d7de"
-              thumbTintColor="#1f6feb"
-              onValueChange={(value) => setPartySize(Math.round(value))}
-            />
+      {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
+        <View style={{ marginVertical: 16, alignItems: 'center' }}>
+          <Turnstile
+            ref={turnstileRef}
+            siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
+            onSuccess={(token) => {
+              console.log('[QueueUp][Turnstile] Token received');
+              setTurnstileToken(token);
+            }}
+            onError={(error) => {
+              console.error('[QueueUp][Turnstile] Error:', error);
+              setTurnstileToken(null);
+            }}
+            onExpire={() => {
+              console.warn('[QueueUp][Turnstile] Token expired');
+              setTurnstileToken(null);
+            }}
+            onWidgetLoad={(widgetId) => {
+              console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
+            }}
+            options={{
+              theme: 'light',
+              size: 'normal',
+            }}
+          />
+        </View>
+      ) : null}
 
-            {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
-              <View style={{ marginVertical: 16, alignItems: 'center' }}>
-                <Turnstile
-                  ref={turnstileRef}
-                  siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
-                  onSuccess={(token) => {
-                    console.log('[QueueUp][Turnstile] Token received');
-                    setTurnstileToken(token);
-                  }}
-                  onError={(error) => {
-                    console.error('[QueueUp][Turnstile] Error:', error);
-                    setTurnstileToken(null);
-                  }}
-                  onExpire={() => {
-                    console.warn('[QueueUp][Turnstile] Token expired');
-                    setTurnstileToken(null);
-                  }}
-                  onWidgetLoad={(widgetId) => {
-                    console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
-                  }}
-                  options={{
-                    theme: 'light',
-                    size: 'normal',
-                  }}
-                />
-              </View>
-            ) : null}
+      {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
+        <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
+          Complete the verification above to join
+        </Text>
+      ) : null}
 
-            {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
-              <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
-                Complete the verification above to join
-              </Text>
-            ) : null}
+      <View style={styles.actionsRow}>
+        {inQueue ? (
+          <Pressable
+            style={[styles.leaveButton, leaveLoading ? styles.leaveButtonDisabled : undefined]}
+            onPress={confirmLeave}
+            disabled={leaveLoading}>
+            {leaveLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Leave Queue</Text>
+            )}
+          </Pressable>
+        ) : (
+          <Pressable
+            style={[
+              styles.button,
+              loading ||
+              (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
+                ? styles.buttonDisabled
+                : undefined,
+            ]}
+            onPress={onSubmit}
+            disabled={
+              loading ||
+              inQueue ||
+              (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
+            }>
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Join Queue</Text>
+            )}
+          </Pressable>
+        )}
+      </View>
+    </>
+  );
 
-            <View style={styles.actionsRow}>
-              {inQueue ? (
-                <Pressable
-                  style={[
-                    styles.leaveButton,
-                    leaveLoading ? styles.leaveButtonDisabled : undefined,
-                  ]}
-                  onPress={confirmLeave}
-                  disabled={leaveLoading}>
-                  {leaveLoading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>Leave Queue</Text>
-                  )}
-                </Pressable>
-              ) : (
-                <Pressable
-                  style={[
-                    styles.button,
-                    (loading || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken))
-                      ? styles.buttonDisabled
-                      : undefined
-                  ]}
-                  onPress={onSubmit}
-                  disabled={loading || inQueue || (isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken)}>
-                  {loading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>Join Queue</Text>
-                  )}
-                </Pressable>
-              )}
-            </View>
-          </View>
+  const renderInfoPanel = () => (
+    <View style={styles.infoCard}>
+      <Text style={styles.infoTitle}>How It Works</Text>
 
-          {resultText ? (
-            <View style={styles.resultCard}>
-              <Text style={styles.resultText}>{resultText}</Text>
-              {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
-              {renderPushBell()}
-            </View>
-          ) : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
+      <View style={styles.infoSection}>
+        <View style={styles.infoStepNumber}>
+          <Text style={styles.infoStepNumberText}>1</Text>
+        </View>
+        <Text style={styles.infoStepTitle}>Enter the Queue Code</Text>
+        <Text style={styles.infoStepDescription}>
+          Get the 6-character code from the host or scan the QR code at the venue.
+        </Text>
+      </View>
+
+      <View style={styles.infoSection}>
+        <View style={styles.infoStepNumber}>
+          <Text style={styles.infoStepNumberText}>2</Text>
+        </View>
+        <Text style={styles.infoStepTitle}>Add Your Details</Text>
+        <Text style={styles.infoStepDescription}>
+          Enter your name (optional) and party size so the host knows who you are.
+        </Text>
+      </View>
+
+      <View style={styles.infoSection}>
+        <View style={styles.infoStepNumber}>
+          <Text style={styles.infoStepNumberText}>3</Text>
+        </View>
+        <Text style={styles.infoStepTitle}>Wait for Your Turn</Text>
+        <Text style={styles.infoStepDescription}>
+          Track your position in real-time. You will be notified when it is your turn.
+        </Text>
+      </View>
+
+      <View style={styles.infoDivider} />
+
+      <View style={styles.infoTipCard}>
+        <Text style={styles.infoTipTitle}>Pro Tips</Text>
+        <View style={styles.infoFeatureRow}>
+          <Bell style={styles.infoFeatureIcon as never} size={18} strokeWidth={2.4} />
+          <Text style={styles.infoFeatureText}>
+            Enable notifications to get alerted when it is your turn
+          </Text>
+        </View>
+        <View style={styles.infoFeatureRow}>
+          <Smartphone style={styles.infoFeatureIcon as never} size={18} strokeWidth={2.4} />
+          <Text style={styles.infoFeatureText}>Keep this page open to see live updates</Text>
+        </View>
+        <View style={styles.infoFeatureRow}>
+          <Users style={styles.infoFeatureIcon as never} size={18} strokeWidth={2.4} />
+          <Text style={styles.infoFeatureText}>
+            Set your party size accurately for better wait estimates
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderModals = () => (
+    <>
       <Modal
         visible={scannerVisible}
         animationType="slide"
@@ -909,7 +1029,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             onBarcodeScanned={scannerActive ? handleBarcodeScanned : undefined}
           />
           <View style={styles.scannerControls}>
-            <Text style={styles.scannerHint}>Align the QR code with the frame to fill the key.</Text>
+            <Text style={styles.scannerHint}>
+              Align the QR code with the frame to fill the key.
+            </Text>
             <Pressable style={styles.scannerCloseButton} onPress={handleCloseScanner}>
               <Text style={styles.scannerCloseText}>Close</Text>
             </Pressable>
@@ -926,21 +1048,77 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           <View style={styles.webModalCard}>
             <Text style={styles.webModalTitle}>Connection Error</Text>
             <Text style={styles.webModalMessage}>
-              {connectionError || 'Unable to connect to the server. Please check your internet connection and try again.'}
+              {connectionError ||
+                'Unable to connect to the server. Please check your internet connection and try again.'}
             </Text>
             <View style={styles.webModalActions}>
               <Pressable style={styles.webModalCancelButton} onPress={handleGoHome}>
                 <Text style={styles.webModalCancelText}>Go Home</Text>
               </Pressable>
-              <Pressable
-                style={styles.webModalConfirmButton}
-                onPress={handleRetryConnection}>
+              <Pressable style={styles.webModalConfirmButton} onPress={handleRetryConnection}>
                 <Text style={styles.webModalConfirmText}>Retry</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
+    </>
+  );
+
+  // Desktop layout
+  if (isDesktop) {
+    return (
+      <SafeAreaProvider style={styles.safe}>
+        <ScrollView
+          contentContainerStyle={styles.desktopContainer}
+          style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled">
+          {/* Left column - Form */}
+          <View style={styles.desktopFormColumn}>
+            <Text style={styles.desktopTitle}>Join a Queue</Text>
+            <Text style={styles.desktopSubtitle}>
+              Enter the queue code to reserve your spot in line.
+            </Text>
+            <View style={styles.desktopCard}>{renderFormFields()}</View>
+
+            {resultText ? (
+              <View style={[styles.resultCard, { marginTop: 24 }]}>
+                <Text style={styles.resultText}>{resultText}</Text>
+                {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
+                {renderPushBell()}
+              </View>
+            ) : null}
+          </View>
+
+          {/* Right column - Info */}
+          <View style={styles.desktopInfoColumn}>{renderInfoPanel()}</View>
+        </ScrollView>
+        {renderModals()}
+      </SafeAreaProvider>
+    );
+  }
+
+  // Mobile layout
+  return (
+    <SafeAreaProvider style={styles.safe}>
+      <KeyboardAvoidingView
+        behavior={Platform.select({ ios: 'padding', android: undefined })}
+        style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <Text style={styles.title}>Join Queue</Text>
+
+          <View style={styles.card}>{renderFormFields()}</View>
+
+          {resultText ? (
+            <View style={styles.resultCard}>
+              <Text style={styles.resultText}>{resultText}</Text>
+              {inQueue ? <Text style={styles.resultHint}>{connectionLabel}</Text> : null}
+              {renderPushBell()}
+            </View>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
+      {renderModals()}
     </SafeAreaProvider>
   );
 }

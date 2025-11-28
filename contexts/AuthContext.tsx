@@ -9,6 +9,7 @@ import React, {
 import { Platform, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../lib/backend';
+import { storage, setAuthExpiredCallback } from '../utils/storage';
 
 // Constants
 const AUTH_SESSION_KEY = 'queueup-auth-session';
@@ -32,8 +33,12 @@ interface AuthState {
   isAdmin: boolean;
 }
 
+interface LoginOptions {
+  returnTo?: string;
+}
+
 interface AuthContextType extends AuthState {
-  login: (provider?: 'github' | 'google') => Promise<void>;
+  login: (provider?: 'github' | 'google', options?: LoginOptions) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -169,11 +174,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [sessionToken, setSessionToken] = useState<string | null>(null);
 
+  // Handle session expiry from storage layer
+  const handleAuthExpired = useCallback(() => {
+    console.log('Session expired, clearing auth state');
+    clearStoredSessionToken();
+    void storage.clearQueuesCache();
+    setSessionToken(null);
+    setState({
+      user: null,
+      isLoading: false,
+      isAuthenticated: false,
+      isAdmin: false,
+    });
+  }, []);
+
+  // Register the auth expired callback with storage
+  useEffect(() => {
+    setAuthExpiredCallback(handleAuthExpired);
+    return () => {
+      setAuthExpiredCallback(null);
+    };
+  }, [handleAuthExpired]);
+
   // Handle deep link callbacks (for native apps)
   const handleDeepLink = useCallback(async (url: string) => {
     try {
       const parsed = new URL(url);
-      const token = parsed.searchParams.get('exchange_token');
+      // Check fragment first (security improvement - tokens now in fragment)
+      // then fall back to query params for backwards compatibility
+      const fragmentParams = new URLSearchParams(parsed.hash.slice(1));
+      const token =
+        fragmentParams.get('exchange_token') || parsed.searchParams.get('exchange_token');
+      const returnTo = fragmentParams.get('return_to') || parsed.searchParams.get('return_to');
 
       if (token) {
         const result = await exchangeToken(token);
@@ -186,6 +218,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isAuthenticated: true,
             isAdmin: result.user.is_admin === true,
           });
+
+          // Migrate localStorage queues to server after successful login
+          try {
+            const migrationResult = await storage.migrateQueuesToServer();
+            if (migrationResult.claimedOwned > 0 || migrationResult.claimedJoined > 0) {
+              console.log(
+                `Migrated queues to server: ${migrationResult.claimedOwned} owned, ${migrationResult.claimedJoined} joined`
+              );
+            }
+          } catch (migrationError) {
+            console.warn('Queue migration failed:', migrationError);
+          }
+
+          // TODO: Handle native navigation to returnTo
+          // This would require a navigation ref to be passed in or exposed
+          // For now, native apps will return to the default screen
+          if (returnTo) {
+            console.log('Native auth complete, should navigate to:', returnTo);
+          }
         }
       }
     } catch (error) {
@@ -197,14 +248,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleWebAuthCallback = useCallback(async () => {
     if (Platform.OS !== 'web') return;
 
-    const params = new URLSearchParams(window.location.search);
-    const authStatus = params.get('auth');
-    const exchangeTokenParam = params.get('exchange_token');
+    // Check for fragment params first (cross-origin flow uses fragments for security)
+    // Fragments are not sent to the server via Referer header
+    const fragmentParams = new URLSearchParams(window.location.hash.slice(1));
+    const queryParams = new URLSearchParams(window.location.search);
+
+    // Prefer fragment params, fall back to query params for same-origin cookie flow
+    const authStatus = fragmentParams.get('auth') || queryParams.get('auth');
+    const exchangeTokenParam = fragmentParams.get('exchange_token'); // Only in fragment
+    const returnTo = fragmentParams.get('return_to') || queryParams.get('return_to');
 
     if (authStatus === 'success') {
-      // Clear the URL params first
-      const newUrl = window.location.pathname + window.location.hash;
-      window.history.replaceState({}, '', newUrl || '/');
+      // Determine where to navigate after auth
+      // returnTo is the in-app path (e.g., '/admin', '/join/ABC123')
+      const targetPath = returnTo || '/';
+
+      // Clear the URL params and navigate to returnTo
+      window.history.replaceState({}, '', targetPath);
 
       // Check if we have an exchange token (cross-origin flow like localhost)
       if (exchangeTokenParam) {
@@ -219,6 +279,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isAuthenticated: true,
             isAdmin: result.user.is_admin === true,
           });
+
+          // Migrate localStorage queues to server after successful login
+          try {
+            const migrationResult = await storage.migrateQueuesToServer();
+            if (migrationResult.claimedOwned > 0 || migrationResult.claimedJoined > 0) {
+              console.log(
+                `Migrated queues to server: ${migrationResult.claimedOwned} owned, ${migrationResult.claimedJoined} joined`
+              );
+            }
+          } catch (migrationError) {
+            console.warn('Queue migration failed:', migrationError);
+          }
+
           return;
         } else {
           console.error('Failed to exchange token');
@@ -240,13 +313,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isAdmin: user?.is_admin === true,
       });
+
+      // Migrate localStorage queues to server after successful login (same-origin flow)
+      if (user) {
+        try {
+          const migrationResult = await storage.migrateQueuesToServer();
+          if (migrationResult.claimedOwned > 0 || migrationResult.claimedJoined > 0) {
+            console.log(
+              `Migrated queues to server: ${migrationResult.claimedOwned} owned, ${migrationResult.claimedJoined} joined`
+            );
+          }
+        } catch (migrationError) {
+          console.warn('Queue migration failed:', migrationError);
+        }
+      }
     } else if (authStatus === 'error') {
-      const errorMsg = params.get('error') || 'Authentication failed';
+      const errorMsg =
+        fragmentParams.get('error') || queryParams.get('error') || 'Authentication failed';
       console.error('Auth error:', errorMsg);
 
-      // Clear the URL params
-      const newUrl = window.location.pathname + window.location.hash;
-      window.history.replaceState({}, '', newUrl || '/');
+      // Clear the URL params, navigate back to returnTo or home
+      const targetPath = returnTo || '/';
+      window.history.replaceState({}, '', targetPath);
 
       setState({
         user: null,
@@ -261,10 +349,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     async function initAuth() {
       try {
-        // Check for web auth callback first
+        // Check for web auth callback first (fragment or query params)
         if (Platform.OS === 'web') {
-          const params = new URLSearchParams(window.location.search);
-          if (params.get('auth')) {
+          const fragmentParams = new URLSearchParams(window.location.hash.slice(1));
+          const queryParams = new URLSearchParams(window.location.search);
+          if (fragmentParams.get('auth') || queryParams.get('auth')) {
             await handleWebAuthCallback();
             return;
           }
@@ -318,32 +407,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [handleDeepLink]);
 
   // Login function
-  const login = useCallback(async (provider: 'github' | 'google' = 'github') => {
-    const isNative = Platform.OS !== 'web';
-    const platform = isNative ? 'native' : 'web';
+  const login = useCallback(
+    async (provider: 'github' | 'google' = 'github', options?: LoginOptions) => {
+      const isNative = Platform.OS !== 'web';
+      const platform = isNative ? 'native' : 'web';
 
-    // Build the auth URL based on provider
-    const authUrl = new URL(`${API_BASE_URL}/api/auth/${provider}`);
-    authUrl.searchParams.set('platform', platform);
+      // Build the auth URL based on provider
+      const authUrl = new URL(`${API_BASE_URL}/api/auth/${provider}`);
+      authUrl.searchParams.set('platform', platform);
 
-    if (isNative) {
-      // For native apps, set the deep link redirect URI
-      authUrl.searchParams.set('redirect_uri', 'queueup://auth/callback');
-      // Open in system browser
-      await Linking.openURL(authUrl.toString());
-    } else {
-      // For web, pass the current origin so we redirect back here after auth
-      // This allows localhost dev and production to both work
-      const currentOrigin = window.location.origin;
-      authUrl.searchParams.set('redirect_uri', currentOrigin);
-      window.location.href = authUrl.toString();
-    }
-  }, []);
+      // Determine returnTo path
+      let returnTo = options?.returnTo;
+      if (!returnTo && Platform.OS === 'web') {
+        // Default: return to current path (preserving the user's location)
+        returnTo = window.location.pathname + window.location.search;
+      }
+
+      if (returnTo) {
+        authUrl.searchParams.set('return_to', returnTo);
+      }
+
+      if (isNative) {
+        // For native apps, set the deep link redirect URI
+        authUrl.searchParams.set('redirect_uri', 'queueup://auth/callback');
+        // Open in system browser
+        await Linking.openURL(authUrl.toString());
+      } else {
+        // For web, pass the current origin so we redirect back here after auth
+        // This allows localhost dev and production to both work
+        const currentOrigin = window.location.origin;
+        authUrl.searchParams.set('redirect_uri', currentOrigin);
+        window.location.href = authUrl.toString();
+      }
+    },
+    []
+  );
 
   // Logout function
   const logout = useCallback(async () => {
     await logoutFromServer(sessionToken);
     await clearStoredSessionToken();
+    await storage.clearQueuesCache();
     setSessionToken(null);
     setState({
       user: null,
