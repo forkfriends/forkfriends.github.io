@@ -840,6 +840,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       try {
         // Remove this queue from persistent storage so HomeScreen won't show it anymore
         await storage.removeQueue(code);
+        // Invalidate cache so next fetch from server won't include closed queues
+        storage.invalidateCache();
       } catch (err) {
         console.warn('Failed to remove queue from storage after close', err);
       }
@@ -851,7 +853,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       } catch (err) {
         console.warn('Failed to remove host auth from storage after close', err);
       }
-      await poll();
+      // Navigate to HomeScreen with a modal message
+      navigation.replace('HomeScreen', {
+        showModal: {
+          title: 'Queue Closed',
+          message: 'Your queue has been successfully closed.',
+        },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to close queue';
       Alert.alert('Unable to close queue', message);
@@ -863,8 +871,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     code,
     hasHostAuth,
     hostToken,
+    navigation,
     nowServing?.id,
-    poll,
     queue.length,
     sessionId,
     trackHostAction,

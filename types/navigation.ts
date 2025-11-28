@@ -1,5 +1,5 @@
 export type RootStackParamList = {
-  HomeScreen: undefined;
+  HomeScreen: { showModal?: { title: string; message: string } } | undefined;
   LoginScreen: undefined;
   MakeQueueScreen: { id: string } | undefined;
   JoinQueueScreen: { id: string; code?: string } | undefined;
