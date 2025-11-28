@@ -129,7 +129,12 @@ export const storage = {
     let queues = await this.getJoinedQueues();
     
     // Safety check: if we got an empty array but there should be data, retry once
-    if (queues.length === 0 && window.localStorage.getItem(JOINED_QUEUES_KEY)) {
+    if (
+      queues.length === 0 &&
+      typeof window !== 'undefined' &&
+      typeof window.localStorage !== 'undefined' &&
+      window.localStorage.getItem(JOINED_QUEUES_KEY)
+    ) {
       console.warn('Detected potential storage read issue, retrying...');
       await new Promise(resolve => setTimeout(resolve, 100));
       const retryQueues = await this.getJoinedQueues();
@@ -197,7 +202,12 @@ export const storage = {
     let queues = await this.getJoinedQueues();
     
     // Safety check: if we got an empty array but there should be data, retry once
-    if (queues.length === 0 && window.localStorage.getItem(JOINED_QUEUES_KEY)) {
+    if (
+      queues.length === 0 &&
+      typeof window !== 'undefined' &&
+      typeof window.localStorage !== 'undefined' &&
+      window.localStorage.getItem(JOINED_QUEUES_KEY)
+    ) {
       console.warn('Detected potential storage read issue, retrying...');
       await new Promise(resolve => setTimeout(resolve, 100));
       const retryQueues = await this.getJoinedQueues();
