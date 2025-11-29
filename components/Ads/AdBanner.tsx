@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, View, Text } from 'react-native';
-import { AdMobBanner, setTestDeviceIDAsync } from 'expo-ads-admob';
+import Constants from 'expo-constants';
 
 type Props = {
   adUnitId?: string;
@@ -11,21 +11,93 @@ const TEST_BANNER_ID = 'ca-app-pub-3940256099942544/6300978111'; // Google test 
 const TEST_ADSENSE_CLIENT = 'ca-pub-3940256099942544'; // Google test AdSense client (web)
 const TEST_ADSENSE_SLOT = '2003685630'; // Google test AdSense slot (web)
 
+type AdMobModule = {
+  AdMobBanner: React.ComponentType<any>;
+  isAvailableAsync?: () => Promise<boolean>;
+  setTestDeviceIDAsync?: (id: string | null) => Promise<void>;
+};
+
 export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
+  const isExpoGo = Constants.appOwnership === 'expo';
+  const [admobModule, setAdmobModule] = useState<AdMobModule | null>(null);
+  const [admobReady, setAdmobReady] = useState<boolean | null>(
+    Platform.OS === 'web' || isExpoGo ? false : null
+  );
+
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    void setTestDeviceIDAsync('EMULATOR');
+    if (isExpoGo) return; // AdMob native modules aren't bundled in Expo Go
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const mod = (await import('expo-ads-admob')) as AdMobModule;
+        if (cancelled) return;
+
+        const available = (await mod.isAvailableAsync?.()) ?? false;
+        if (cancelled) return;
+
+        if (!available) {
+          setAdmobReady(false);
+          return;
+        }
+
+        setAdmobModule(mod);
+        setAdmobReady(true);
+        await mod.setTestDeviceIDAsync?.('EMULATOR');
+      } catch (err) {
+        console.warn('[AdBanner] AdMob unavailable, skipping native ads', err);
+        if (!cancelled) {
+          setAdmobReady(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (Platform.OS === 'web') {
     return <WebAdSenseBanner variant={variant} />;
   }
 
+  // Expo Go cannot host the native AdMob module; show a soft placeholder instead.
+  if (isExpoGo) {
+    return (
+      <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+        <PlaceholderCard />
+        <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+          Ads need a dev/production build
+        </Text>
+      </View>
+    );
+  }
+
+  if (admobReady === null) {
+    // Still probing availability; keep layout stable
+    return (
+      <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+        <Text style={{ fontSize: 12, color: '#6b7280', padding: 8 }}>Loading ad…</Text>
+      </View>
+    );
+  }
+
+  if (admobReady === false || !admobModule) {
+    return (
+      <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+        <PlaceholderCard />
+      </View>
+    );
+  }
+
+  const BannerComponent = admobModule.AdMobBanner;
   const resolvedUnitId = adUnitId || process.env.EXPO_PUBLIC_ADMOB_BANNER_ID || TEST_BANNER_ID;
 
   return (
     <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
-      <AdMobBanner
+      <BannerComponent
         bannerSize="smartBannerPortrait"
         adUnitID={resolvedUnitId}
         servePersonalizedAds={false}
