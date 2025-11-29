@@ -725,13 +725,13 @@ export default function MakeQueueScreen({ navigation }: Props) {
         </View>
       ) : null}
 
-      {/* Turnstile Widget */}
-      {process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
+      {/* Turnstile Widget - Web requires env var, Native uses server config */}
+      {(isWeb ? process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY : true) ? (
         <View style={{ marginVertical: 16, alignItems: 'center' }}>
           {isWeb ? (
             <Turnstile
               ref={turnstileRef}
-              siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
+              siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY!}
               onSuccess={(token) => {
                 console.log('[QueueUp][Turnstile] Token received');
                 setTurnstileToken(token);
@@ -754,7 +754,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
             />
           ) : (
             <TurnstileNative
-              siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
+              ref={turnstileRef}
               onSuccess={(token) => {
                 console.log('[QueueUp][TurnstileNative] Token received');
                 setTurnstileToken(token);
@@ -773,7 +773,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
         </View>
       ) : null}
 
-      {process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
+      {!turnstileToken ? (
         <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
           Complete the verification above to create queue
         </Text>
@@ -781,16 +781,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
 
       {/* Submit */}
       <Pressable
-        style={[
-          styles.button,
-          loading || (Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
-            ? styles.buttonDisabled
-            : undefined,
-        ]}
+        style={[styles.button, loading || !turnstileToken ? styles.buttonDisabled : undefined]}
         onPress={onSubmit}
-        disabled={
-          loading || (Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
-        }>
+        disabled={loading || !turnstileToken}>
         {loading ? (
           <ActivityIndicator color="#fff" />
         ) : (

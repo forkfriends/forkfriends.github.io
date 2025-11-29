@@ -39,6 +39,7 @@ export interface Env {
   DB: D1Database;
   EVENTS: Queue;
   TURNSTILE_SECRET_KEY: string;
+  TURNSTILE_SITE_KEY?: string;
   HOST_AUTH_SECRET: string;
   VAPID_PUBLIC?: string;
   VAPID_PRIVATE?: string;
@@ -107,8 +108,15 @@ export default {
 
       // Turnstile Widget Page (for native apps) - served before CORS check
       if (url.pathname === '/turnstile') {
-        const siteKey = url.searchParams.get('siteKey') || '';
-        const theme = url.searchParams.get('theme') || 'light';
+        // Use server-configured site key - don't accept from query params to prevent XSS
+        const siteKey = env.TURNSTILE_SITE_KEY || '';
+        if (!siteKey) {
+          return new Response('Turnstile not configured', { status: 503 });
+        }
+
+        // Validate theme parameter - only allow known values
+        const themeParam = url.searchParams.get('theme');
+        const theme = themeParam === 'dark' || themeParam === 'auto' ? themeParam : 'light';
 
         const html = `<!DOCTYPE html>
 <html>

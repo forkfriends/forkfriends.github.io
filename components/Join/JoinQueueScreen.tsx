@@ -251,17 +251,22 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
 
       // Check if queue requires authentication
       if (joinError.requiresAuth) {
+        const returnTo = `/join/${trimmed}`;
         showModal({
           title: 'Login Required',
           message: 'This queue requires you to sign in before joining.',
           buttons: [
             { text: 'Cancel', style: 'cancel', onPress: () => {} },
             {
-              text: 'Sign In',
+              text: 'GitHub',
               onPress: () => {
-                // Build the return URL to come back to this join screen with the code
-                const returnTo = `/join/${trimmed}`;
                 login('github', { returnTo });
+              },
+            },
+            {
+              text: 'Google',
+              onPress: () => {
+                login('google', { returnTo });
               },
             },
           ],
@@ -934,6 +939,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
             />
           ) : (
             <TurnstileNative
+              ref={turnstileRef}
               onSuccess={(token) => {
                 console.log('[QueueUp][TurnstileNative] Token received');
                 setTurnstileToken(token);
