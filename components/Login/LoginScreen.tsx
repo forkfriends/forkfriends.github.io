@@ -1,5 +1,7 @@
 import React from 'react';
 import { View, Text, Image, Pressable, Platform, useWindowDimensions } from 'react-native';
+import { FontAwesome } from '@expo/vector-icons';
+import Svg, { Path } from 'react-native-svg';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Check } from 'lucide-react-native';
@@ -44,13 +46,7 @@ export default function LoginScreen({ navigation }: Props) {
         onPress={handleGitHubLogin}
         accessibilityRole="button"
         accessibilityLabel="Sign in with GitHub">
-        <Image
-          source={{
-            uri: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEyIDBDNS4zNyAwIDAgNS4zNyAwIDEyYzAgNS4zMSAzLjQzNSA5LjggOC4yMDUgMTEuMzg1LjYuMTEzLjgyLS4yNTguODItLjU3NyAwLS4yODUtLjAxLTEuMDQtLjAxNS0yLjA0LTMuMzM4LjcyNC00LjA0Mi0xLjYxLTQuMDQyLTEuNjFDNC40MjIgMTcuMDcgMy42MzMgMTYuNyAzLjYzMyAxNi43Yy0xLjA4Ny0uNzQ0LjA4NC0uNzI5LjA4NC0uNzI5IDEuMjA1LjA4NCAxLjgzOCAxLjIzNiAxLjgzOCAxLjIzNiAxLjA3IDEuODM1IDIuODA5IDEuMzA1IDMuNDk1Ljk5OC4xMDgtLjc3Ni40MTctMS4zMDUuNzYtMS42MDUtMi42NjUtLjMtNS40NjYtMS4zMzItNS40NjYtNS45MyAwLTEuMzEuNDY1LTIuMzggMS4yMzUtMy4yMi0uMTM1LS4zMDMtLjU0LTEuNTIzLjEwNS0zLjE3NiAwIDAgMS4wMDUtLjMyMiAzLjMgMS4yMy45Ni0uMjY3IDEuOTgtLjM5OSAzLS40MDUgMS4wMi4wMDYgMi4wNC4xMzggMyAuNDA1IDIuMjgtMS41NTIgMy4yODUtMS4yMyAzLjI4NS0xLjIzLjY0NSAxLjY1My4yNCAyLjg3My4xMiAzLjE3Ni43NjUuODQgMS4yMyAxLjkxIDEuMjMgMy4yMiAwIDQuNjEtMi44MDUgNS42MjUtNS40NzUgNS45Mi40Mi4zNi44MSAxLjA5Ni44MSAyLjIyIDAgMS42MDYtLjAxNSAyLjg5Ni0uMDE1IDMuMjg2IDAgLjMxNS4yMS42OS44MjUuNTdDMjAuNTY1IDIxLjc5NSAyNCAxNy4zIDI0IDEyYzAtNi42My01LjM3LTEyLTEyLTEyeiIvPjwvc3ZnPg==',
-          }}
-          style={styles.providerIcon}
-          resizeMode="contain"
-        />
+        <FontAwesome name="github" size={18} color="#fff" style={{ marginRight: 8 }} />
         <Text style={[styles.providerText, styles.githubText]}>Continue with GitHub</Text>
       </Pressable>
 
@@ -62,13 +58,24 @@ export default function LoginScreen({ navigation }: Props) {
         onPress={handleGoogleLogin}
         accessibilityRole="button"
         accessibilityLabel="Sign in with Google">
-        <Image
-          source={{
-            uri: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMjIuNTYgMTIuMjVjMC0uNzgtLjA3LTEuNTMtLjItMi4yNUgxMnY0LjI2aDUuOTJjLS4yNiAxLjM3LTEuMDQgMi41My0yLjIxIDMuMzF2Mi43N2gzLjU3YzIuMDgtMS45MiAzLjI4LTQuNzQgMy4yOC04LjA5eiIgZmlsbD0iIzQyODVGNCIvPjxwYXRoIGQ9Ik0xMiAyM2MzIDAgNS41MS0uOTkgNy4zNS0yLjY5bC0zLjU3LTIuNzdjLS45OS42Ny0yLjI2IDEuMDctMy43OCAxLjA3LTIuOSAwLTUuMzYtMS45Ny02LjI0LTQuNjFIMS42OHYyLjg1QzMuNDggMjAuNTMgNy40NCAyMyAxMiAyM3oiIGZpbGw9IiMzNEE4NTMiLz48cGF0aCBkPSJNNS43NiAxNC41OGMtLjI1LS43NC0uMzktMS41NC0uMzktMi4zNiAwLS44My4xNC0xLjYyLjM4LTIuMzZWNi45OEgxLjY4QTExLjk5IDExLjk5IDAgMCAwIDAgMTJjMCAxLjk0LjQ3IDMuNzcgMS4zIDUuNGw0LjQ2LTIuODJ6IiBmaWxsPSIjRkJCQzA1Ii8+PHBhdGggZD0iTTEyIDUuMzhjMS42MSAwIDMuMDYuNTYgNC4yMSAxLjY0bDMuMTUtMy4xNUMxNy40NSAxLjk5IDE0Ljk3LjgxIDEyIC44MSA3LjQ1LjgxIDMuNDggMy4yNiAxLjY5IDYuOThsNC41NiAyLjg1YzEtMi42NiAzLjU2LTQuNjUgNS43NS00LjY1eiIgZmlsbD0iI0VBNDMzNSIvPjwvc3ZnPg==',
-          }}
-          style={styles.providerIcon}
-          resizeMode="contain"
-        />
+        <Svg width={20} height={20} viewBox="0 0 48 48" style={{ marginRight: 8 }}>
+          <Path
+            fill="#EA4335"
+            d="M24 9.5c3.54 0 6.7 1.22 9.17 3.6l6.82-6.82C35.8 2.64 30.6 0 24 0 14.64 0 6.58 5.74 2.56 14.06l7.96 6.19C12.43 13.14 17.74 9.5 24 9.5z"
+          />
+          <Path
+            fill="#4285F4"
+            d="M46.1 24.55c0-1.58-.14-3.11-.41-4.59H24v8.7h12.35c-.53 2.88-2.1 5.32-4.47 6.98l6.85 5.32C42.94 36.63 46.1 31.1 46.1 24.55z"
+          />
+          <Path
+            fill="#FBBC05"
+            d="M10.52 28.25c-.48-1.43-.75-2.95-.75-4.5s.27-3.07.75-4.5l-7.96-6.19C.92 15.74 0 19.29 0 23.75s.92 8.01 2.56 11.69l7.96-6.19z"
+          />
+          <Path
+            fill="#34A853"
+            d="M24 47.5c6.6 0 12.12-2.17 16.16-5.92l-6.85-5.32c-1.9 1.28-4.33 2.06-7.31 2.06-6.26 0-11.57-3.64-13.48-8.75l-7.96 6.19C6.58 42.26 14.64 47.5 24 47.5z"
+          />
+        </Svg>
         <Text style={[styles.providerText, styles.googleText]}>Continue with Google</Text>
       </Pressable>
     </View>
@@ -90,7 +97,7 @@ export default function LoginScreen({ navigation }: Props) {
                 />
               ) : (
                 <Image
-                  source={require('@assets/ff_logo.png')}
+                  source={require('@assets/icon-black.png')}
                   style={styles.desktopBrandingLogo}
                   resizeMode="contain"
                 />
@@ -150,7 +157,7 @@ export default function LoginScreen({ navigation }: Props) {
             />
           ) : (
             <Image
-              source={require('@assets/ff_logo.png')}
+              source={require('@assets/icon-black.png')}
               style={styles.logoIcon}
               resizeMode="contain"
             />
