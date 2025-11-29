@@ -15,7 +15,6 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types/navigation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useModal } from '../../contexts/ModalContext';
-import AdBanner from '../Ads/AdBanner';
 import styles from './HomeScreen.Styles';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;

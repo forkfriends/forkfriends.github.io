@@ -18,6 +18,7 @@ import {
   Text,
   Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, LogOut, User, BarChart3 } from 'lucide-react-native';
 import './global.css';
 
@@ -349,7 +350,6 @@ function AppNavigator() {
     <NavigationContainer ref={navigationRef} linking={linking} documentTitle={documentTitleConfig}>
       <StatusBar style="auto" />
       <View style={{ flex: 1 }}>
-        <AdBanner variant="banner" />
         <Stack.Navigator
           initialRouteName="HomeScreen"
           screenOptions={({ navigation, route }) => {
@@ -464,6 +464,13 @@ function AppNavigator() {
             options={{ headerBackTitle: 'Back' }}
           />
         </Stack.Navigator>
+        {Platform.OS === 'web' ? (
+          <AdBanner variant="banner" />
+        ) : (
+          <SafeAreaView edges={['bottom']} style={{ backgroundColor: '#fff' }}>
+            <AdBanner variant="banner" />
+          </SafeAreaView>
+        )}
         <AdPopup visible={showPopup} onClose={closePopup} />
       </View>
     </NavigationContainer>

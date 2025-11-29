@@ -66,7 +66,7 @@ export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
   // Expo Go cannot host the native AdMob module; show a soft placeholder instead.
   if (isExpoGo) {
     return (
-      <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
         <PlaceholderCard />
         <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
           Ads need a dev/production build
@@ -78,7 +78,7 @@ export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
   if (admobReady === null) {
     // Still probing availability; keep layout stable
     return (
-      <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
         <Text style={{ fontSize: 12, color: '#6b7280', padding: 8 }}>Loading ad…</Text>
       </View>
     );
@@ -86,7 +86,7 @@ export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
 
   if (admobReady === false || !admobModule) {
     return (
-      <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
         <PlaceholderCard />
       </View>
     );
@@ -96,7 +96,7 @@ export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
   const resolvedUnitId = adUnitId || process.env.EXPO_PUBLIC_ADMOB_BANNER_ID || TEST_BANNER_ID;
 
   return (
-    <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 8 }}>
+    <View style={{ alignItems: 'center', paddingVertical: 8 }}>
       <BannerComponent
         bannerSize="smartBannerPortrait"
         adUnitID={resolvedUnitId}
@@ -231,15 +231,15 @@ function PlaceholderCard() {
   return (
     <View
       style={{
-        minHeight: 50,
-        minWidth: 200,
-        width: '100%',
-        height: '100%',
+        height: 50,
+        width: 320,
+        maxWidth: '100%',
         paddingHorizontal: 12,
         paddingVertical: 10,
         backgroundColor: '#eef2ff',
         borderColor: '#c7d2fe',
         borderWidth: 1,
+        borderRadius: 4,
         alignItems: 'center',
         justifyContent: 'center',
       }}>
