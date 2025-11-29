@@ -1016,9 +1016,14 @@ export default function AdminDashboardScreen(_props: Props) {
           <Text style={[styles.loadingText, { marginTop: 16, marginBottom: 24 }]}>
             Please log in to view analytics
           </Text>
-          <Pressable style={styles.retryButton} onPress={() => login()}>
-            <Text style={styles.retryButtonText}>Log in with GitHub</Text>
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Pressable style={styles.retryButton} onPress={() => login('github')}>
+              <Text style={styles.retryButtonText}>GitHub</Text>
+            </Pressable>
+            <Pressable style={styles.retryButton} onPress={() => login('google')}>
+              <Text style={styles.retryButtonText}>Google</Text>
+            </Pressable>
+          </View>
         </View>
       </SafeAreaProvider>
     );
