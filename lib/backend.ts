@@ -210,8 +210,9 @@ export async function joinQueue({
 }
 
 async function buildJoinError(response: Response): Promise<JoinQueueError> {
+  const clone = response.clone(); // allow multiple reads safely
   try {
-    const data = await response.json();
+    const data = await clone.json();
     const message = typeof data?.error === 'string' ? data.error : JSON.stringify(data);
     const error = new Error(
       message || `Request failed with status ${response.status}`
@@ -229,7 +230,7 @@ async function buildJoinError(response: Response): Promise<JoinQueueError> {
 
     return error;
   } catch {
-    const text = await response.text();
+    const text = await clone.text();
     return new Error(text || `Request failed with status ${response.status}`) as JoinQueueError;
   }
 }
