@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Lightbulb,
   TrendingUp,
@@ -19,6 +20,7 @@ import {
   CheckCircle,
   Info,
 } from 'lucide-react-native';
+import Svg, { Path } from 'react-native-svg';
 import type { RootStackParamList } from '../../types/navigation';
 import { API_BASE_URL } from '../../lib/backend';
 import { useAuth } from '../../contexts/AuthContext';
@@ -119,7 +121,7 @@ const DESKTOP_BREAKPOINT = 1024;
 const TABLET_BREAKPOINT = 768;
 
 // Get session token for API calls (needed for cross-origin like localhost)
-function getSessionToken(): string | null {
+async function getSessionToken(): Promise<string | null> {
   if (Platform.OS === 'web') {
     try {
       return localStorage.getItem(AUTH_SESSION_KEY);
@@ -127,7 +129,12 @@ function getSessionToken(): string | null {
       return null;
     }
   }
-  return null;
+  // Native: use AsyncStorage
+  try {
+    return await AsyncStorage.getItem(AUTH_SESSION_KEY);
+  } catch {
+    return null;
+  }
 }
 
 // Chart colors
@@ -179,7 +186,7 @@ export default function AdminDashboardScreen(_props: Props) {
     try {
       setError(null);
       const headers: HeadersInit = {};
-      const token = getSessionToken();
+      const token = await getSessionToken();
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -222,7 +229,7 @@ export default function AdminDashboardScreen(_props: Props) {
     async (exportType: 'parties' | 'events' | 'queues') => {
       try {
         const headers: HeadersInit = {};
-        const token = getSessionToken();
+        const token = await getSessionToken();
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
         }
@@ -517,7 +524,7 @@ export default function AdminDashboardScreen(_props: Props) {
           </View>
 
           {/* SVG Chart */}
-          <svg
+          <Svg
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
             style={{
@@ -527,15 +534,15 @@ export default function AdminDashboardScreen(_props: Props) {
               top: 0,
               left: 0,
             }}>
-            <path d={areaPath} fill="rgba(59, 130, 246, 0.2)" />
-            <path
+            <Path d={areaPath} fill="rgba(59, 130, 246, 0.2)" />
+            <Path
               d={linePath}
               fill="none"
               stroke={CHART_COLORS.primary}
               strokeWidth="2"
               vectorEffect="non-scaling-stroke"
             />
-          </svg>
+          </Svg>
 
           {/* Data points with hover */}
           <View style={styles.areaChartPoints}>
