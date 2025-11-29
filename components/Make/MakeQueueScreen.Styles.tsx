@@ -329,6 +329,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1f6feb',
   },
+  inputError: {
+    borderColor: '#d93025',
+  },
+  inputErrorText: {
+    marginTop: 6,
+    color: '#d93025',
+    fontSize: 13,
+  },
   button: {
     marginTop: 18,
     backgroundColor: '#111',

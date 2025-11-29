@@ -57,6 +57,20 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   // Effective partyId: use route param if available, otherwise use recovered value
   const partyId = initialPartyId || recoveredPartyId;
 
+  const anonymousDisplayName = useMemo(() => {
+    if (guestName?.trim()) {
+      return null;
+    }
+    const key = partyId || code || 'anon';
+    let hash = 0;
+    for (let i = 0; i < key.length; i += 1) {
+      hash = (hash << 5) - hash + key.charCodeAt(i);
+      hash |= 0; // force 32-bit
+    }
+    const idx = Math.abs(hash) % anonymousNames.length;
+    return `Anonymous ${anonymousNames[idx]}`;
+  }, [anonymousNames, guestName, partyId, code]);
+
   // Recover partyId from storage when missing (e.g., page refresh)
   useEffect(() => {
     if (initialPartyId || !code) {
@@ -911,7 +925,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       <Text style={styles.sectionTitle}>Your Party</Text>
       <View style={styles.detailRow}>
         <Text style={styles.detailLabel}>Name</Text>
-        <Text style={styles.detailValue}>{guestName?.trim() || 'Anonymous'}</Text>
+        <Text style={styles.detailValue}>{guestName?.trim() || anonymousDisplayName}</Text>
       </View>
       <View style={styles.detailRow}>
         <Text style={styles.detailLabel}>Party Size</Text>
