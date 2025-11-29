@@ -19,7 +19,7 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
 const STATE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
-const SESSION_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const SESSION_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000; // 14 days (reduced from 30)
 const EXCHANGE_TOKEN_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
 export const AUTH_COOKIE_NAME = 'queueup_session';
@@ -42,6 +42,9 @@ const ALLOWED_REDIRECT_URIS = [
   // Native app deep link
   'queueup://auth/callback',
 ];
+
+// Pattern for Expo Go development URLs (exp://IP:PORT/--/path)
+const EXPO_GO_PATTERN = /^exp:\/\/[\d.]+:\d+\/--\/auth\/callback$/;
 
 export interface GitHubUser {
   id: number;
@@ -93,6 +96,18 @@ export function generateSecureToken(length: number = 32): string {
 }
 
 /**
+ * Hash a token using SHA-256 for secure storage
+ * Returns a hex-encoded hash
+ */
+export async function hashToken(token: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(token);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * Generate a UUID v4
  */
 export function generateUUID(): string {
@@ -106,16 +121,17 @@ export async function createOAuthState(
   db: D1Database,
   platform: 'web' | 'native',
   redirectUri?: string | null,
-  provider: 'github' | 'google' = 'github'
+  provider: 'github' | 'google' = 'github',
+  returnTo?: string | null
 ): Promise<string> {
   const state = generateSecureToken(32);
   const expiresAt = Math.floor((Date.now() + STATE_EXPIRY_MS) / 1000);
 
   await db
     .prepare(
-      'INSERT INTO oauth_states (state, platform, redirect_uri, expires_at, provider) VALUES (?1, ?2, ?3, ?4, ?5)'
+      'INSERT INTO oauth_states (state, platform, redirect_uri, expires_at, provider, return_to) VALUES (?1, ?2, ?3, ?4, ?5, ?6)'
     )
-    .bind(state, platform, redirectUri || null, expiresAt, provider)
+    .bind(state, platform, redirectUri || null, expiresAt, provider, returnTo || null)
     .run();
 
   return state;
@@ -131,31 +147,33 @@ export async function validateOAuthState(
   platform: 'web' | 'native';
   redirectUri: string | null;
   provider: 'github' | 'google';
+  returnTo: string | null;
 } | null> {
   const now = Math.floor(Date.now() / 1000);
 
+  // Atomic delete-and-return to prevent race conditions (TOCTOU)
+  // This ensures the state can only be used once, even with concurrent requests
   const row = await db
     .prepare(
-      'SELECT platform, redirect_uri, provider FROM oauth_states WHERE state = ?1 AND expires_at > ?2'
+      'DELETE FROM oauth_states WHERE state = ?1 AND expires_at > ?2 RETURNING platform, redirect_uri, provider, return_to'
     )
     .bind(state, now)
     .first<{
       platform: 'web' | 'native';
       redirect_uri: string | null;
       provider: 'github' | 'google' | null;
+      return_to: string | null;
     }>();
 
   if (!row) {
     return null;
   }
 
-  // Delete the state (single-use)
-  await db.prepare('DELETE FROM oauth_states WHERE state = ?1').bind(state).run();
-
   return {
     platform: row.platform,
     redirectUri: row.redirect_uri,
     provider: row.provider || 'github',
+    returnTo: row.return_to,
   };
 }
 
@@ -545,9 +563,12 @@ export const findOrCreateUser = findOrCreateUserFromGitHub;
 
 /**
  * Create a new session for a user
+ * The session ID returned to the client is the raw token.
+ * We store a SHA-256 hash of the token in the database.
  */
 export async function createSession(db: D1Database, userId: string): Promise<Session> {
-  const id = generateSecureToken(32);
+  const rawToken = generateSecureToken(32);
+  const tokenHash = await hashToken(rawToken);
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = Math.floor((Date.now() + SESSION_EXPIRY_MS) / 1000);
 
@@ -555,16 +576,19 @@ export async function createSession(db: D1Database, userId: string): Promise<Ses
     .prepare(
       'INSERT INTO user_sessions (id, user_id, expires_at, created_at) VALUES (?1, ?2, ?3, ?4)'
     )
-    .bind(id, userId, expiresAt, now)
+    .bind(tokenHash, userId, expiresAt, now)
     .run();
 
-  return { id, user_id: userId, expires_at: expiresAt, created_at: now };
+  // Return the raw token to the client (they never see the hash)
+  return { id: rawToken, user_id: userId, expires_at: expiresAt, created_at: now };
 }
 
 /**
  * Validate session and get user
+ * The client provides the raw token; we hash it to look up in DB
  */
 export async function validateSession(db: D1Database, sessionId: string): Promise<User | null> {
+  const tokenHash = await hashToken(sessionId);
   const now = Math.floor(Date.now() / 1000);
 
   const result = await db
@@ -573,7 +597,7 @@ export async function validateSession(db: D1Database, sessionId: string): Promis
        INNER JOIN user_sessions s ON u.id = s.user_id
        WHERE s.id = ?1 AND s.expires_at > ?2`
     )
-    .bind(sessionId, now)
+    .bind(tokenHash, now)
     .first<User>();
 
   return result || null;
@@ -581,45 +605,61 @@ export async function validateSession(db: D1Database, sessionId: string): Promis
 
 /**
  * Delete a session (logout)
+ * The client provides the raw token; we hash it to find in DB
  */
 export async function deleteSession(db: D1Database, sessionId: string): Promise<void> {
-  await db.prepare('DELETE FROM user_sessions WHERE id = ?1').bind(sessionId).run();
+  const tokenHash = await hashToken(sessionId);
+  await db.prepare('DELETE FROM user_sessions WHERE id = ?1').bind(tokenHash).run();
+}
+
+/**
+ * Delete all sessions for a user (logout everywhere)
+ */
+export async function deleteAllUserSessions(db: D1Database, userId: string): Promise<number> {
+  const result = await db
+    .prepare('DELETE FROM user_sessions WHERE user_id = ?1')
+    .bind(userId)
+    .run();
+  return result.meta.changes;
 }
 
 /**
  * Create a short-lived exchange token for native apps
+ * We store the hash, return the raw token to the client
  */
 export async function createExchangeToken(db: D1Database, userId: string): Promise<string> {
-  const token = generateSecureToken(32);
+  const rawToken = generateSecureToken(32);
+  const tokenHash = await hashToken(rawToken);
   const expiresAt = Math.floor((Date.now() + EXCHANGE_TOKEN_EXPIRY_MS) / 1000);
 
   await db
     .prepare('INSERT INTO exchange_tokens (token, user_id, expires_at) VALUES (?1, ?2, ?3)')
-    .bind(token, userId, expiresAt)
+    .bind(tokenHash, userId, expiresAt)
     .run();
 
-  return token;
+  return rawToken;
 }
 
 /**
  * Validate and consume exchange token
+ * The client provides the raw token; we hash it to look up in DB
  */
 export async function validateExchangeToken(db: D1Database, token: string): Promise<string | null> {
+  const tokenHash = await hashToken(token);
   const now = Math.floor(Date.now() / 1000);
 
+  // Atomic update-and-return to prevent race conditions (TOCTOU)
+  // This ensures the token can only be used once, even with concurrent requests
   const row = await db
     .prepare(
-      'SELECT user_id FROM exchange_tokens WHERE token = ?1 AND expires_at > ?2 AND used = 0'
+      'UPDATE exchange_tokens SET used = 1 WHERE token = ?1 AND expires_at > ?2 AND used = 0 RETURNING user_id'
     )
-    .bind(token, now)
+    .bind(tokenHash, now)
     .first<{ user_id: string }>();
 
   if (!row) {
     return null;
   }
-
-  // Mark as used (single-use)
-  await db.prepare('UPDATE exchange_tokens SET used = 1 WHERE token = ?1').bind(token).run();
 
   return row.user_id;
 }
@@ -637,7 +677,7 @@ export function buildSessionCookie(
     `Max-Age=${maxAgeSeconds}`,
     'HttpOnly',
     'Secure',
-    'SameSite=Lax',
+    'SameSite=None', // Required for cross-origin requests with credentials
     'Path=/',
   ];
 
@@ -657,7 +697,7 @@ export function buildClearSessionCookie(domain?: string): string {
     'Max-Age=0',
     'HttpOnly',
     'Secure',
-    'SameSite=Lax',
+    'SameSite=None', // Must match the original cookie's SameSite setting
     'Path=/',
   ];
 
@@ -709,9 +749,62 @@ export function getSessionFromRequest(request: Request): string | null {
 
 /**
  * Validate redirect URI
+ * Ensures the URI exactly matches an allowed origin or is a subpath of an allowed origin.
+ * Prevents open redirect attacks (e.g., forkfriends.github.io.evil.com)
  */
 export function isValidRedirectUri(uri: string): boolean {
-  return ALLOWED_REDIRECT_URIS.some((allowed) => uri === allowed || uri.startsWith(allowed));
+  try {
+    // Check for Expo Go development URLs (exp://IP:PORT/--/auth/callback)
+    // These are only valid during development
+    if (EXPO_GO_PATTERN.test(uri)) {
+      return true;
+    }
+
+    const parsedUri = new URL(uri);
+    return ALLOWED_REDIRECT_URIS.some((allowed) => {
+      const parsedAllowed = new URL(allowed);
+      // Must match protocol and host exactly
+      if (parsedUri.protocol !== parsedAllowed.protocol) return false;
+      if (parsedUri.host !== parsedAllowed.host) return false;
+      // Path must be equal or a subpath (starts with allowed path)
+      return (
+        parsedUri.pathname === parsedAllowed.pathname ||
+        parsedUri.pathname.startsWith(
+          parsedAllowed.pathname.endsWith('/')
+            ? parsedAllowed.pathname
+            : parsedAllowed.pathname + '/'
+        )
+      );
+    });
+  } catch {
+    // Invalid URL
+    return false;
+  }
+}
+
+/**
+ * Validate return_to parameter
+ * Must be a relative path starting with / (no protocol, no host)
+ * Prevents open redirect attacks via return_to parameter
+ */
+export function isValidReturnTo(returnTo: string): boolean {
+  // Must start with / and not contain // (prevents protocol-relative URLs)
+  // Must not contain : before the first / (prevents javascript:, data:, etc.)
+  if (!returnTo.startsWith('/')) return false;
+  if (returnTo.startsWith('//')) return false;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(returnTo)) return false;
+  // Additional check: no backslashes (some browsers normalize \\ to //)
+  if (returnTo.includes('\\')) return false;
+  return true;
+}
+
+/**
+ * Sanitize return_to parameter
+ * Returns the value if valid, null otherwise
+ */
+export function sanitizeReturnTo(returnTo: string | null | undefined): string | null {
+  if (!returnTo) return null;
+  return isValidReturnTo(returnTo) ? returnTo : null;
 }
 
 /**
@@ -727,17 +820,24 @@ export async function cleanupExpiredAuth(db: D1Database): Promise<void> {
   ]);
 }
 
-// Admin emails whitelist
-// Set ADMIN_EMAILS as a comma-separated list in your environment, e.g. ADMIN_EMAILS="admin1@example.com,admin2@example.com"
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ? process.env.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase()) : []);
+/**
+ * Parse admin emails from environment variable string
+ */
+function parseAdminEmails(adminEmailsEnv: string | undefined): string[] {
+  if (!adminEmailsEnv) return [];
+  return adminEmailsEnv.split(',').map((e) => e.trim().toLowerCase());
+}
 
 /**
  * Check if a user is an admin
+ * @param user - The user to check
+ * @param adminEmailsEnv - The ADMIN_EMAILS environment variable (comma-separated list)
  */
-export function isAdmin(user: User | null): boolean {
+export function isAdmin(user: User | null, adminEmailsEnv: string | undefined): boolean {
   if (!user) return false;
+  const adminEmails = parseAdminEmails(adminEmailsEnv);
   // Check email for admin status
-  if (user.email && ADMIN_EMAILS.includes(user.email.toLowerCase())) {
+  if (user.email && adminEmails.includes(user.email.toLowerCase())) {
     return true;
   }
   return false;
@@ -749,11 +849,12 @@ export function isAdmin(user: User | null): boolean {
  */
 export async function validateAdminSession(
   db: D1Database,
-  sessionId: string
+  sessionId: string,
+  adminEmailsEnv: string | undefined
 ): Promise<User | null> {
   const user = await validateSession(db, sessionId);
   if (!user) return null;
-  if (!isAdmin(user)) return null;
+  if (!isAdmin(user, adminEmailsEnv)) return null;
   return user;
 }
 
@@ -763,7 +864,8 @@ export async function validateAdminSession(
  */
 export async function requireAdmin(
   db: D1Database,
-  request: Request
+  request: Request,
+  adminEmailsEnv: string | undefined
 ): Promise<{ user: User | null; error: Response | null }> {
   const sessionId = getSessionFromRequest(request);
 
@@ -789,7 +891,7 @@ export async function requireAdmin(
     };
   }
 
-  if (!isAdmin(user)) {
+  if (!isAdmin(user, adminEmailsEnv)) {
     return {
       user: null,
       error: new Response(JSON.stringify({ error: 'Admin access required' }), {

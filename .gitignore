@@ -12,7 +12,10 @@ web-build/
 
 api/.wrangler
 
+# Environment files with secrets - use .env.example as template
+.env
 .env.local
+.env.*.local
 
 ios
 android

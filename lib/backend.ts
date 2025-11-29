@@ -1,10 +1,50 @@
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DEFAULT_LOCALHOST = Platform.select({
   ios: 'http://127.0.0.1:8787',
   android: 'http://10.0.2.2:8787',
   default: 'http://localhost:8787',
 });
+
+// Session storage key - must match AuthContext
+const AUTH_SESSION_KEY = 'queueup-auth-session';
+
+/**
+ * Get stored session token for authenticated API calls
+ * Works across web (localStorage) and native (AsyncStorage)
+ */
+async function getStoredSessionToken(): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    try {
+      return localStorage.getItem(AUTH_SESSION_KEY);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return await AsyncStorage.getItem(AUTH_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build headers for authenticated API requests
+ * Includes Bearer token if available (for cross-origin scenarios)
+ */
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const headers: HeadersInit = {
+    'content-type': 'application/json',
+  };
+
+  const token = await getStoredSessionToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  return headers;
+}
 
 const rawApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
 const apiBaseUrlWithDefault = rawApiBaseUrl ?? DEFAULT_LOCALHOST;
@@ -26,6 +66,8 @@ export interface CreateQueueResult {
   contactInfo?: string | null;
   openTime?: string | null;
   closeTime?: string | null;
+  requiresAuth?: boolean;
+  ownerId?: string | null;
 }
 
 export interface CreateQueueParams {
@@ -36,6 +78,7 @@ export interface CreateQueueParams {
   contactInfo?: string;
   openTime?: string;
   closeTime?: string;
+  requiresAuth?: boolean;
 }
 
 export const HOST_COOKIE_NAME = 'queue_host_auth';
@@ -71,7 +114,16 @@ function extractHostToken(setCookieHeader: string | null): string | undefined {
 const MIN_QUEUE_CAPACITY = 1;
 const MAX_QUEUE_CAPACITY = 100;
 
-export async function createQueue({ eventName, maxGuests, turnstileToken, location, contactInfo, openTime, closeTime }: CreateQueueParams): Promise<CreateQueueResult> {
+export async function createQueue({
+  eventName,
+  maxGuests,
+  turnstileToken,
+  location,
+  contactInfo,
+  openTime,
+  closeTime,
+  requiresAuth,
+}: CreateQueueParams): Promise<CreateQueueResult> {
   const trimmedEventName = eventName.trim();
   const normalizedMaxGuests = Number.isFinite(maxGuests)
     ? Math.min(MAX_QUEUE_CAPACITY, Math.max(MIN_QUEUE_CAPACITY, Math.round(maxGuests)))
@@ -86,14 +138,14 @@ export async function createQueue({ eventName, maxGuests, turnstileToken, locati
     ...(openTime ? { openTime } : {}),
     ...(closeTime ? { closeTime } : {}),
     ...(turnstileToken && { turnstileToken }),
+    ...(requiresAuth !== undefined && { requiresAuth }),
   };
+  // Include auth headers for owner identification (needed for requiresAuth feature)
+  const headers = await getAuthHeaders();
   const response = await fetch(`${API_BASE_URL}/api/queue/create`, {
     method: 'POST',
     credentials: 'include',
-    headers: {
-      'content-type': 'application/json',
-      [CLIENT_PLATFORM_HEADER]: clientPlatformValue,
-    },
+    headers,
     body: JSON.stringify(body),
   });
 
@@ -124,7 +176,18 @@ export interface JoinQueueResult {
   eventName?: string;
 }
 
-export async function joinQueue({ code, name, size, turnstileToken }: JoinQueueParams): Promise<JoinQueueResult> {
+export interface JoinQueueError extends Error {
+  requiresAuth?: boolean;
+  existingPartyId?: string;
+}
+
+export async function joinQueue({
+  code,
+  name,
+  size,
+  turnstileToken,
+}: JoinQueueParams): Promise<JoinQueueResult> {
+  const headers = await getAuthHeaders();
   const payload = {
     name: name?.trim() || undefined,
     size: size && Number.isFinite(size) ? size : undefined,
@@ -133,18 +196,46 @@ export async function joinQueue({ code, name, size, turnstileToken }: JoinQueueP
 
   const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/join`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      [CLIENT_PLATFORM_HEADER]: clientPlatformValue,
-    },
+    headers,
+    credentials: 'include', // Include session cookie for auth
     body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
-    throw await buildError(response);
+    const error = await buildJoinError(response);
+    throw error;
   }
 
   return (await response.json()) as JoinQueueResult;
+}
+
+async function buildJoinError(response: Response): Promise<JoinQueueError> {
+  try {
+    const data = await response.clone().json();
+    const message = typeof data?.error === 'string' ? data.error : JSON.stringify(data);
+    const error = new Error(
+      message || `Request failed with status ${response.status}`
+    ) as JoinQueueError;
+
+    // Attach requiresAuth flag if present
+    if (data?.requiresAuth === true) {
+      error.requiresAuth = true;
+    }
+
+    // Attach existingPartyId if user already in queue
+    if (typeof data?.existingPartyId === 'string') {
+      error.existingPartyId = data.existingPartyId;
+    }
+
+    return error;
+  } catch {
+    try {
+      const text = await response.clone().text();
+      return new Error(text || `Request failed with status ${response.status}`) as JoinQueueError;
+    } catch {
+      return new Error(`Request failed with status ${response.status}`) as JoinQueueError;
+    }
+  }
 }
 
 export interface LeaveQueueParams {
@@ -174,18 +265,28 @@ function toWebSocketUrl(url: string): string {
   return url;
 }
 
-export function buildHostConnectUrl(wsUrl: string, hostAuthToken?: string): string {
-  if (!hostAuthToken) {
-    return toWebSocketUrl(wsUrl);
-  }
-  try {
-    const parsed = new URL(wsUrl);
-    parsed.searchParams.set('hostToken', hostAuthToken);
-    return toWebSocketUrl(parsed.toString());
-  } catch {
-    const separator = wsUrl.includes('?') ? '&' : '?';
-    return toWebSocketUrl(`${wsUrl}${separator}hostToken=${encodeURIComponent(hostAuthToken)}`);
-  }
+/**
+ * Build the WebSocket URL for host connections.
+ *
+ * SECURITY NOTE: Host authentication is now done via headers only (x-host-auth or cookie).
+ * Query string tokens are no longer supported to prevent token leakage via Referer headers.
+ *
+ * @deprecated WebSocket connections should set x-host-auth header instead of using this function.
+ * Use buildHostWsUrlFromCode() and set the header in your WebSocket client.
+ */
+export function buildHostConnectUrl(wsUrl: string, _hostAuthToken?: string): string {
+  // No longer include token in URL - must use headers
+  return toWebSocketUrl(wsUrl);
+}
+
+/**
+ * Build the WebSocket URL for a host given a queue code
+ * Used when navigating to HostQueueScreen from HostDashboard
+ */
+export function buildHostWsUrlFromCode(code: string): string {
+  const normalizedCode = code.toUpperCase();
+  const base = `${API_BASE_URL || DEFAULT_LOCALHOST}/api/queue/${normalizedCode}/connect`;
+  return toWebSocketUrl(base);
 }
 
 export function buildGuestConnectUrl(code: string, partyId: string): string {
@@ -311,11 +412,132 @@ export async function closeQueueHost({ code, hostAuthToken }: CloseQueueParams):
 
 async function buildError(response: Response): Promise<Error> {
   try {
-    const data = await response.json();
+    const data = await response.clone().json();
     const message = typeof data?.error === 'string' ? data.error : JSON.stringify(data);
     return new Error(message || `Request failed with status ${response.status}`);
   } catch {
-    const text = await response.text();
-    return new Error(text || `Request failed with status ${response.status}`);
+    try {
+      const text = await response.clone().text();
+      return new Error(text || `Request failed with status ${response.status}`);
+    } catch {
+      return new Error(`Request failed with status ${response.status}`);
+    }
   }
+}
+
+export interface QueueStats {
+  activeCount: number;
+  servedCount: number;
+  leftCount: number;
+  noShowCount: number;
+  avgWaitSeconds: number | null;
+}
+
+export interface MyQueue {
+  id: string;
+  shortCode: string;
+  eventName: string | null;
+  status: string;
+  createdAt: number;
+  maxGuests: number | null;
+  location: string | null;
+  contactInfo: string | null;
+  openTime: string | null;
+  closeTime: string | null;
+  requiresAuth: boolean;
+  stats: QueueStats;
+}
+
+export interface GetMyQueuesResult {
+  queues: MyQueue[];
+}
+
+export async function getMyQueues(): Promise<GetMyQueuesResult> {
+  const headers = await getAuthHeaders();
+
+  const response = await fetch(`${API_BASE_URL}/api/queues/mine`, {
+    method: 'GET',
+    credentials: 'include',
+    headers,
+  });
+
+  if (!response.ok) {
+    throw await buildError(response);
+  }
+
+  return (await response.json()) as GetMyQueuesResult;
+}
+
+// Types for user memberships (queues joined as guest)
+export interface QueueMembership {
+  partyId: string;
+  sessionId: string;
+  name: string | null;
+  size: number;
+  status: string;
+  joinedAt: number;
+  calledAt: number | null;
+  completedAt: number | null;
+  queue: {
+    shortCode: string;
+    eventName: string | null;
+    status: string;
+    location: string | null;
+    contactInfo: string | null;
+  };
+}
+
+export interface GetMyMembershipsResult {
+  memberships: QueueMembership[];
+}
+
+/**
+ * Get all queues the authenticated user has joined as a guest
+ */
+export async function getMyMemberships(): Promise<GetMyMembershipsResult> {
+  const headers = await getAuthHeaders();
+
+  const response = await fetch(`${API_BASE_URL}/api/user/memberships`, {
+    method: 'GET',
+    credentials: 'include',
+    headers,
+  });
+
+  if (!response.ok) {
+    throw await buildError(response);
+  }
+
+  return (await response.json()) as GetMyMembershipsResult;
+}
+
+export interface ClaimQueuesParams {
+  ownedQueues?: { sessionId: string; hostAuthToken: string }[];
+  joinedQueues?: { sessionId: string; partyId: string }[];
+}
+
+export interface ClaimQueuesResult {
+  success: boolean;
+  claimedOwned: number;
+  claimedJoined: number;
+}
+
+/**
+ * Claim localStorage queues to the authenticated user's account
+ * Called after login to migrate local queue data to server
+ */
+export async function claimQueues(params: ClaimQueuesParams): Promise<ClaimQueuesResult> {
+  const headers = await getAuthHeaders();
+
+  const response = await fetch(`${API_BASE_URL}/api/user/claim-queues`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    throw await buildError(response);
+  }
+
+  return (await response.json()) as ClaimQueuesResult;
 }

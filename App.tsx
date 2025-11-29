@@ -1,18 +1,24 @@
-import React, { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  Platform,
+  NavigationContainer,
+  useNavigationContainerRef,
+  useNavigation,
+} from '@react-navigation/native';
+import {
+  createNativeStackNavigator,
+  NativeStackNavigationProp,
+} from '@react-navigation/native-stack';
+import {
   Pressable,
   StyleSheet,
-  Text,
+  Platform,
+  Image,
   View,
-  Linking,
+  ActivityIndicator,
+  Text,
+  Modal,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Github, LogOut, User } from 'lucide-react-native';
+import { ArrowLeft, LogOut, User, BarChart3 } from 'lucide-react-native';
 import './global.css';
 
 import HomeScreen from './components/Home/HomeScreen';
@@ -22,301 +28,80 @@ import HostQueueScreen from './components/Host/HostQueueScreen';
 import GuestQueueScreen from './components/Guest/GuestQueueScreen';
 import PrivacyPolicyScreen from './components/PrivacyPolicy/PrivacyPolicyScreen';
 import AdminDashboardScreen from './components/Admin/AdminDashboardScreen';
+import HostDashboardScreen from './components/HostDashboard/HostDashboardScreen';
 import LoginScreen from './components/Login/LoginScreen';
 import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import React, { useState } from 'react';
 
-type ScreenName = keyof RootStackParamList;
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
-type ScreenState = {
-  name: ScreenName;
-  params?: unknown;
-};
-
-function getScreenTitle(screenName: ScreenName): string {
-  const screenTitles: Record<ScreenName, string> = {
-    HomeScreen: 'Home',
-    LoginScreen: 'Login',
-    MakeQueueScreen: 'Make Queue',
-    JoinQueueScreen: 'Join Queue',
-    HostQueueScreen: 'Host Queue',
-    GuestQueueScreen: 'Guest Queue',
-    PrivacyPolicyScreen: 'Privacy Policy',
-    AdminDashboardScreen: 'Analytics',
-  };
-  return screenTitles[screenName] ?? screenName;
-}
-
-const GITHUB_URL = 'https://github.com/forkfriends/queueup';
-
-type HeaderRightProps = {
-  navigation: {
-    navigate: (name: ScreenName, params?: unknown) => void;
-  };
-};
-
-function HeaderRight({ navigation }: HeaderRightProps) {
-  const { user, isLoading, logout } = useAuth();
-  const [menuVisible, setMenuVisible] = useState(false);
-
-  if (isLoading) {
-    return (
-      <View style={styles.headerRight}>
-        <ActivityIndicator size="small" color="#666" />
-      </View>
-    );
-  }
-
-  if (user) {
-    const displayName =
-      user.email || user.google_email || user.google_name || user.github_username || 'User';
-    const avatarUrl = user.github_avatar_url || user.google_avatar_url;
-
-    return (
-      <View style={styles.headerRight}>
-        <Pressable
-          style={styles.avatarButton}
-          accessibilityRole="button"
-          accessibilityLabel="Open user menu"
-          hitSlop={8}
-          onPress={() => setMenuVisible(true)}>
-          {avatarUrl ? (
-            <Image
-              source={{ uri: avatarUrl }}
-              style={styles.avatar}
-              accessibilityLabel={`${displayName}'s avatar`}
-            />
-          ) : (
-            <View style={styles.avatarPlaceholder}>
-              <User size={20} color="#666" />
-            </View>
-          )}
-        </Pressable>
-
-        <Modal
-          visible={menuVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setMenuVisible(false)}>
-          <Pressable style={styles.menuOverlay} onPress={() => setMenuVisible(false)}>
-            <Pressable style={styles.menuContainer} onPress={(e) => e.stopPropagation()}>
-              <View style={styles.menuHeader}>
-                <Text style={styles.menuUsername}>{displayName}</Text>
-              </View>
-              <Pressable
-                style={[styles.menuItem, styles.menuItemDestructive]}
-                onPress={async () => {
-                  setMenuVisible(false);
-                  await logout();
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Log out">
-                <LogOut size={18} color="#dc2626" />
-                <Text style={[styles.menuItemText, styles.menuItemTextDestructive]}>Log out</Text>
-              </Pressable>
-            </Pressable>
-          </Pressable>
-        </Modal>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.headerRight}>
-      <Pressable
-        style={styles.loginButton}
-        accessibilityRole="button"
-        accessibilityLabel="Log in"
-        hitSlop={8}
-        onPress={() => navigation.navigate('LoginScreen')}>
-        <Text style={styles.loginButtonText}>Login</Text>
-      </Pressable>
-      <Pressable
-        style={[styles.iconButton, { marginLeft: 8 }]}
-        accessibilityRole="link"
-        accessibilityLabel="View ForkFriends on GitHub"
-        hitSlop={12}
-        onPress={() => {
-          void Linking.openURL(GITHUB_URL);
-        }}>
-        <Github size={22} color="#111" strokeWidth={2} />
-      </Pressable>
-    </View>
-  );
-}
-
-function AppInner() {
-  const [stack, setStack] = useState<ScreenState[]>([{ name: 'HomeScreen' }]);
-  const focusListenersRef = useRef<Record<number, Set<() => void>>>({});
-  const prevIndexRef = useRef(0);
-
-  const currentIndex = stack.length - 1;
-  const current = stack[currentIndex];
-
-  const navigation: any = {
-    navigate: (name: ScreenName, params?: unknown) => {
-      setStack((prev) => [...prev, { name, params }]);
-    },
-    replace: (name: ScreenName, params?: unknown) => {
-      setStack((prev) => {
-        if (!prev.length) return [{ name, params }];
-        const next = [...prev];
-        next[next.length - 1] = { name, params };
-        return next;
-      });
-    },
-    goBack: () => {
-      setStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
-    },
-    canGoBack: () => stack.length > 1,
-    addListener: (type: string, listener: () => void) => {
-      if (type !== 'focus') {
-        return () => {};
+// Linking configuration for deep links and web URLs (web only)
+const linking =
+  Platform.OS === 'web'
+    ? {
+        prefixes: ['queueup://', 'https://queueup.app', 'http://localhost:8081'],
+        config: {
+          screens: {
+            HomeScreen: '',
+            LoginScreen: 'login',
+            MakeQueueScreen: 'make',
+            JoinQueueScreen: 'join/:code?',
+            // Only use the code in the URL path - sensitive params are passed via
+            // navigation state and recovered from storage on page refresh
+            GuestQueueScreen: {
+              path: 'queue/:code',
+              parse: {
+                code: (code: string) => code,
+              },
+              stringify: {
+                code: (code: string) => code,
+                // Exclude sensitive params from URL
+                partyId: () => undefined as unknown as string,
+                sessionId: () => undefined as unknown as string,
+                initialPosition: () => undefined as unknown as string,
+                initialAheadCount: () => undefined as unknown as string,
+                initialQueueLength: () => undefined as unknown as string,
+                initialEtaMs: () => undefined as unknown as string,
+                guestName: () => undefined as unknown as string,
+                partySize: () => undefined as unknown as string,
+              },
+            },
+            HostQueueScreen: {
+              path: 'host/:code',
+              parse: {
+                code: (code: string) => code,
+              },
+              stringify: {
+                code: (code: string) => code,
+                // Exclude sensitive params from URL
+                sessionId: () => undefined as unknown as string,
+                wsUrl: () => undefined as unknown as string,
+                hostAuthToken: () => undefined as unknown as string,
+                joinUrl: () => undefined as unknown as string,
+                eventName: () => undefined as unknown as string,
+                maxGuests: () => undefined as unknown as string,
+                location: () => undefined as unknown as string,
+                contactInfo: () => undefined as unknown as string,
+                openTime: () => undefined as unknown as string,
+                closeTime: () => undefined as unknown as string,
+                requiresAuth: () => undefined as unknown as string,
+              },
+            },
+            PrivacyPolicyScreen: 'privacy',
+            AdminDashboardScreen: 'admin',
+            HostDashboardScreen: 'my-queues',
+          },
+        },
       }
-      const key = currentIndex;
-      const store = focusListenersRef.current;
-      let set = store[key];
-      if (!set) {
-        set = new Set();
-        store[key] = set;
-      }
-      set.add(listener);
-      return () => {
-        const existing = store[key];
-        existing?.delete(listener);
-      };
-    },
-    setOptions: () => {},
-  };
+    : undefined;
 
-  const route: any = {
-    key: current.name,
-    name: current.name,
-    params: current.params,
-  };
-
-  useEffect(() => {
-    if (prevIndexRef.current === currentIndex) {
-      return;
-    }
-    const listeners = focusListenersRef.current[currentIndex];
-    listeners?.forEach((listener) => {
-      try {
-        listener();
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.warn('Focus listener error', error);
-      }
-    });
-    prevIndexRef.current = currentIndex;
-  }, [currentIndex]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') {
-      return;
-    }
-    const screenTitle = getScreenTitle(current.name);
-    document.title = `QueueUp - ${screenTitle}`;
-  }, [current.name]);
-
-  const renderCurrentScreen = () => {
-    switch (current.name) {
-      case 'HomeScreen':
-        return <HomeScreen navigation={navigation} route={route} />;
-      case 'LoginScreen':
-        return <LoginScreen navigation={navigation} route={route} />;
-      case 'MakeQueueScreen':
-        return <MakeQueueScreen navigation={navigation} route={route} />;
-      case 'JoinQueueScreen':
-        return <JoinQueueScreen navigation={navigation} route={route} />;
-      case 'HostQueueScreen':
-        return <HostQueueScreen navigation={navigation} route={route} />;
-      case 'GuestQueueScreen':
-        return <GuestQueueScreen navigation={navigation} route={route} />;
-      case 'PrivacyPolicyScreen':
-        return <PrivacyPolicyScreen navigation={navigation} route={route} />;
-      case 'AdminDashboardScreen':
-        return <AdminDashboardScreen navigation={navigation} route={route} />;
-      default:
-        return null;
-    }
-  };
-
-  return (
-    <SafeAreaProvider>
-      <SafeAreaView style={styles.safeRoot} edges={['top', 'left', 'right']}>
-        <StatusBar style="auto" />
-        <View style={styles.header}>
-          {current.name !== 'HomeScreen' && stack.length > 1 ? (
-            <Pressable
-              style={styles.backButton}
-              accessibilityRole="button"
-              accessibilityLabel="Go back"
-              hitSlop={12}
-              onPress={() => navigation.goBack()}>
-              <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
-            </Pressable>
-          ) : (
-            <View style={styles.headerSpacer} />
-          )}
-          <HeaderRight navigation={navigation} />
-        </View>
-        <View style={styles.content}>{renderCurrentScreen()}</View>
-      </SafeAreaView>
-    </SafeAreaProvider>
-  );
-}
-
-export default function App() {
-  return (
-    <AuthProvider>
-      <ModalProvider>
-        <AppInner />
-      </ModalProvider>
-    </AuthProvider>
-  );
-}
-
-const styles = StyleSheet.create({
-  safeRoot: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#cfd1d4',
-    backgroundColor: '#fff',
-  },
+const headerStyles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  headerSpacer: {
-    width: 40,
-    height: 40,
-  },
-  backButton: {
-    padding: 8,
-    marginLeft: 4,
-  },
-  content: {
-    flex: 1,
-  },
-  iconButton: {
-    padding: 10,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#cfd1d4',
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1.5,
+    marginRight: 8,
   },
   loginButton: {
     paddingHorizontal: 16,
@@ -349,6 +134,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  backButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  backButtonSpacer: {
+    // Same width as backButton to keep header layout consistent
+    width: 38, // 22 (icon) + 8 (padding) + 8 (marginLeft)
+    marginLeft: 8,
+  },
+  // Dropdown menu styles
   menuOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
@@ -378,6 +173,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#111',
   },
+  menuEmail: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -396,3 +196,278 @@ const styles = StyleSheet.create({
     color: '#dc2626',
   },
 });
+
+const getScreenTitle = (screenName: string): string => {
+  const screenTitles: Record<string, string> = {
+    HomeScreen: 'Home',
+    LoginScreen: 'Login',
+    MakeQueueScreen: 'Make Queue',
+    JoinQueueScreen: 'Join Queue',
+    HostQueueScreen: 'Host Queue',
+    GuestQueueScreen: 'Guest Queue',
+    PrivacyPolicyScreen: 'Privacy Policy',
+    AdminDashboardScreen: 'Analytics',
+    HostDashboardScreen: 'My Queues',
+  };
+  return screenTitles[screenName] || screenName;
+};
+
+function HeaderRight() {
+  const { user, isLoading, isAdmin, logout } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [menuVisible, setMenuVisible] = useState(false);
+
+  if (isLoading) {
+    return (
+      <View style={headerStyles.headerRight}>
+        <ActivityIndicator size="small" color="#666" />
+      </View>
+    );
+  }
+
+  if (user) {
+    // Email is the primary identifier, fall back to name/username
+    const displayName =
+      user.email || user.google_email || user.google_name || user.github_username || 'User';
+    const avatarUrl = user.github_avatar_url || user.google_avatar_url;
+
+    return (
+      <View style={headerStyles.headerRight}>
+        <Pressable
+          style={headerStyles.avatarButton}
+          accessibilityRole="button"
+          accessibilityLabel="Open user menu"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          onPress={() => setMenuVisible(true)}>
+          {avatarUrl ? (
+            <Image
+              source={{ uri: avatarUrl }}
+              style={headerStyles.avatar}
+              accessibilityLabel={`${displayName}'s avatar`}
+            />
+          ) : (
+            <View style={headerStyles.avatarPlaceholder}>
+              <User size={20} color="#666" />
+            </View>
+          )}
+        </Pressable>
+
+        <Modal
+          visible={menuVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuVisible(false)}>
+          <Pressable style={headerStyles.menuOverlay} onPress={() => setMenuVisible(false)}>
+            <Pressable style={headerStyles.menuContainer} onPress={(e) => e.stopPropagation()}>
+              {/* User info header */}
+              <View style={headerStyles.menuHeader}>
+                <Text style={headerStyles.menuUsername}>{displayName}</Text>
+              </View>
+
+              {/* My Queues button */}
+              <Pressable
+                style={headerStyles.menuItem}
+                onPress={() => {
+                  setMenuVisible(false);
+                  navigation.navigate('HostDashboardScreen');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="My Queues">
+                <User size={18} color="#111" />
+                <Text style={headerStyles.menuItemText}>My Queues</Text>
+              </Pressable>
+
+              {/* Analytics Dashboard - Admin only */}
+              {isAdmin && (
+                <Pressable
+                  style={headerStyles.menuItem}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    navigation.navigate('AdminDashboardScreen');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Analytics Dashboard">
+                  <BarChart3 size={18} color="#111" />
+                  <Text style={headerStyles.menuItemText}>Analytics Dashboard</Text>
+                </Pressable>
+              )}
+
+              {/* Logout button */}
+              <Pressable
+                style={[headerStyles.menuItem, headerStyles.menuItemDestructive]}
+                onPress={async () => {
+                  setMenuVisible(false);
+                  await logout();
+                  navigation.navigate('HomeScreen');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Log out">
+                <LogOut size={18} color="#dc2626" />
+                <Text style={[headerStyles.menuItemText, headerStyles.menuItemTextDestructive]}>
+                  Log out
+                </Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      </View>
+    );
+  }
+
+  // Not logged in - show Login button
+  return (
+    <View style={headerStyles.headerRight}>
+      <Pressable
+        style={headerStyles.loginButton}
+        accessibilityRole="button"
+        accessibilityLabel="Log in"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        onPress={() => navigation.navigate('LoginScreen')}>
+        <Text style={headerStyles.loginButtonText}>Login</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function AppNavigator() {
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
+
+  // Only use documentTitle on web
+  const documentTitleConfig =
+    Platform.OS === 'web'
+      ? {
+          formatter: (_options: unknown, route: { name?: string } | undefined) =>
+            `QueueUp - ${getScreenTitle(route?.name ?? 'HomeScreen')}`,
+        }
+      : undefined;
+
+  return (
+    <NavigationContainer ref={navigationRef} linking={linking} documentTitle={documentTitleConfig}>
+      <StatusBar style="auto" />
+      <Stack.Navigator
+        initialRouteName="HomeScreen"
+        screenOptions={({ navigation, route }) => {
+          const isNative = Platform.OS !== 'web';
+          const isHomeScreen = route.name === 'HomeScreen';
+
+          // For HostQueueScreen, we need custom back behavior to go to HomeScreen
+          const isHostQueueScreen = route.name === 'HostQueueScreen';
+
+          // Base options for all screens
+          const baseOptions = {
+            headerRight: () => <HeaderRight />,
+            headerTitle: '',
+            headerTintColor: '#111',
+            // This sets what the NEXT screen's back button will say
+            headerBackTitle: 'Back',
+          };
+
+          // Native platforms: use native back button with proper animations
+          if (isNative) {
+            // HomeScreen: no back button
+            if (isHomeScreen) {
+              return {
+                ...baseOptions,
+                headerBackVisible: false,
+                headerLeft: () => <View style={headerStyles.backButtonSpacer} />,
+              };
+            }
+
+            // All other screens: use native back button
+            return {
+              ...baseOptions,
+              headerBackVisible: true,
+            };
+          }
+
+          // Web: custom back button for all non-home screens
+          if (isHomeScreen) {
+            return {
+              ...baseOptions,
+              headerLeft: () => <View style={headerStyles.backButtonSpacer} />,
+            };
+          }
+
+          const handleBack = () => {
+            if (isHostQueueScreen) {
+              navigation.navigate('HomeScreen');
+            } else if (navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              navigation.navigate('HomeScreen');
+            }
+          };
+
+          return {
+            ...baseOptions,
+            headerLeft: () => (
+              <Pressable
+                style={headerStyles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                onPress={handleBack}>
+                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+              </Pressable>
+            ),
+          };
+        }}>
+        <Stack.Screen
+          name="HomeScreen"
+          component={HomeScreen}
+          options={{ headerBackTitle: 'Home' }}
+        />
+        <Stack.Screen
+          name="LoginScreen"
+          component={LoginScreen}
+          options={{ headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="MakeQueueScreen"
+          component={MakeQueueScreen}
+          options={{ headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="JoinQueueScreen"
+          component={JoinQueueScreen}
+          options={{ headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="GuestQueueScreen"
+          component={GuestQueueScreen}
+          options={{ headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="HostQueueScreen"
+          component={HostQueueScreen}
+          options={{ headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="PrivacyPolicyScreen"
+          component={PrivacyPolicyScreen}
+          options={{ headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="AdminDashboardScreen"
+          component={AdminDashboardScreen}
+          options={{ headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="HostDashboardScreen"
+          component={HostDashboardScreen}
+          options={{ headerBackTitle: 'Back' }}
+        />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <ModalProvider>
+        <AppNavigator />
+      </ModalProvider>
+    </AuthProvider>
+  );
+}

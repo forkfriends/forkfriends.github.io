@@ -177,7 +177,7 @@ export class QueueDO implements DurableObject {
       return this.jsonError('Invalid JSON body', 400);
     }
 
-    const { name, size } = payload;
+    const { name, size, userId } = payload;
     if (name !== undefined && typeof name !== 'string') {
       return this.jsonError('name must be a string', 400);
     }
@@ -222,10 +222,13 @@ export class QueueDO implements DurableObject {
 
     this.queue.push(party);
 
+    // Validate userId if provided (should be a string or null)
+    const validUserId = typeof userId === 'string' && userId.length > 0 ? userId : null;
+
     const statements = [
       this.env.DB.prepare(
-        "INSERT INTO parties (id, session_id, name, size, status, nearby, estimated_wait_ms) VALUES (?1, ?2, ?3, ?4, 'waiting', 0, ?5)"
-      ).bind(party.id, this.sessionId, name ?? null, normalizedSize, estimatedWaitMs),
+        "INSERT INTO parties (id, session_id, name, size, status, nearby, estimated_wait_ms, user_id) VALUES (?1, ?2, ?3, ?4, 'waiting', 0, ?5, ?6)"
+      ).bind(party.id, this.sessionId, name ?? null, normalizedSize, estimatedWaitMs, validUserId),
       this.env.DB.prepare(
         "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'joined', ?3)"
       ).bind(
@@ -235,6 +238,7 @@ export class QueueDO implements DurableObject {
           name: party.name ?? null,
           size: party.size ?? null,
           estimated_wait_ms: estimatedWaitMs,
+          user_id: validUserId,
         })
       ),
     ];
@@ -605,9 +609,9 @@ export class QueueDO implements DurableObject {
     const cookieHeader = request.headers.get('Cookie');
     const hostCookie = this.extractCookie(cookieHeader, HOST_COOKIE_NAME);
     const headerToken = request.headers.get('x-host-auth');
-    const queryToken = url.searchParams.get('hostToken');
+    // Security: No longer accept hostToken via query string (prevents Referer leakage)
 
-    const triedTokens = [headerToken, hostCookie, queryToken].filter((token): token is string =>
+    const triedTokens = [headerToken, hostCookie].filter((token): token is string =>
       Boolean(token)
     );
 
@@ -625,8 +629,7 @@ export class QueueDO implements DurableObject {
     if (triedTokens.length > 0) {
       console.warn(
         logPrefix(this.sessionId, 'identifyConnection'),
-        'host authentication failed for provided tokens',
-        triedTokens.map((token) => token.slice(0, 8)).join(',')
+        'host authentication failed for provided tokens'
       );
     } else {
       console.warn(logPrefix(this.sessionId, 'identifyConnection'), 'no host token provided');

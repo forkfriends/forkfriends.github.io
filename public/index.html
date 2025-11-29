@@ -1,9 +1,26 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover, user-scalable=no" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover, user-scalable=no" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://pagead2.googlesyndication.com https://challenges.cloudflare.com;
+        worker-src 'self' blob:;
+        connect-src 'self' blob: https://queueup-api.danielnwachukwu.workers.dev wss://queueup-api.danielnwachukwu.workers.dev https://api.mapbox.com https://events.mapbox.com https://pagead2.googlesyndication.com https://ep1.adtrafficquality.google;
+        img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.githubusercontent.com https://api.mapbox.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://lh4.googleusercontent.com https://lh5.googleusercontent.com https://lh6.googleusercontent.com;
+        style-src 'self' 'unsafe-inline';
+        font-src 'self' data:;
+        frame-src https://challenges.cloudflare.com https://googleads.g.doubleclick.net https://tpc.googlesyndication.com;
+        base-uri 'self';
+        form-action 'self';
+        object-src 'none'
+      " />
 
     <!-- PWA Meta Tags -->
     <meta name="application-name" content="QueueUp" />
@@ -27,25 +44,25 @@
     <link rel="shortcut icon" href="/favicon.ico" />
 
     <!-- Google AdSense -->
-    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1031200014799170"
+    <script
+      async
+      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1031200014799170"
       crossorigin="anonymous"></script>
 
     <!-- Web App Manifest -->
     <script>
       (function () {
         var isLocalhost =
-          window.location.hostname === 'localhost' ||
-          window.location.hostname === '127.0.0.1';
+          window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         // If the site is served from /queueup (old GitHub Pages project site), keep that prefix.
         // Otherwise (root domain like forkfriends.github.io), use no prefix.
-        var basePath = !isLocalhost && window.location.pathname.startsWith('/queueup') ? '/queueup' : '';
+        var basePath =
+          !isLocalhost && window.location.pathname.startsWith('/queueup') ? '/queueup' : '';
 
         // Inject manifest link
         var manifestLink = document.createElement('link');
         manifestLink.rel = 'manifest';
-        manifestLink.href = isLocalhost
-          ? '/manifest-local.json'
-          : basePath + '/manifest.json';
+        manifestLink.href = isLocalhost ? '/manifest-local.json' : basePath + '/manifest.json';
         document.head.appendChild(manifestLink);
 
         // Update apple-touch-icon to respect basePath
@@ -55,9 +72,7 @@
         }
 
         // Update favicons to respect basePath
-        var favicons = document.querySelectorAll(
-          'link[rel="icon"], link[rel="shortcut icon"]'
-        );
+        var favicons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
         favicons.forEach(function (link) {
           var url = new URL(link.href, window.location.origin);
           if (url.pathname.endsWith('/favicon.png')) {
@@ -94,9 +109,7 @@
 
   <body>
     <!-- Use static rendering with Expo Router to support running without JavaScript. -->
-    <noscript>
-      You need to enable JavaScript to run this app.
-    </noscript>
+    <noscript> You need to enable JavaScript to run this app. </noscript>
     <!-- The root element for your Expo app. -->
     <div id="root"></div>
   </body>
