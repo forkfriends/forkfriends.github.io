@@ -83,6 +83,7 @@ export type StoredQueue = {
   contactInfo?: string | null;
   openTime?: string | null;
   closeTime?: string | null;
+   requiresAuth?: boolean;
   createdAt: number; // timestamp for sorting
 };
 
@@ -197,6 +198,7 @@ export const storage = {
         contactInfo: q.contactInfo,
         openTime: q.openTime,
         closeTime: q.closeTime,
+        requiresAuth: q.requiresAuth ?? false,
         createdAt: q.createdAt * 1000, // Convert seconds to ms
       }));
 
