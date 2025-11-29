@@ -18,7 +18,7 @@ import {
   Text,
   Modal,
 } from 'react-native';
-import { ArrowLeft, LogOut, User } from 'lucide-react-native';
+import { ArrowLeft, LogOut, User, BarChart3 } from 'lucide-react-native';
 import './global.css';
 
 import HomeScreen from './components/Home/HomeScreen';
@@ -40,62 +40,65 @@ import AdPopup from './components/Ads/AdPopup';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-// Linking configuration for deep links and web URLs
-const linking = {
-  prefixes: ['queueup://', 'https://queueup.app', 'http://localhost:8081'],
-  config: {
-    screens: {
-      HomeScreen: '',
-      LoginScreen: 'login',
-      MakeQueueScreen: 'make',
-      JoinQueueScreen: 'join/:code?',
-      // Only use the code in the URL path - sensitive params are passed via
-      // navigation state and recovered from storage on page refresh
-      GuestQueueScreen: {
-        path: 'queue/:code',
-        parse: {
-          code: (code: string) => code,
+// Linking configuration for deep links and web URLs (web only)
+const linking =
+  Platform.OS === 'web'
+    ? {
+        prefixes: ['queueup://', 'https://queueup.app', 'http://localhost:8081'],
+        config: {
+          screens: {
+            HomeScreen: '',
+            LoginScreen: 'login',
+            MakeQueueScreen: 'make',
+            JoinQueueScreen: 'join/:code?',
+            // Only use the code in the URL path - sensitive params are passed via
+            // navigation state and recovered from storage on page refresh
+            GuestQueueScreen: {
+              path: 'queue/:code',
+              parse: {
+                code: (code: string) => code,
+              },
+              stringify: {
+                code: (code: string) => code,
+                // Exclude sensitive params from URL
+                partyId: () => undefined as unknown as string,
+                sessionId: () => undefined as unknown as string,
+                initialPosition: () => undefined as unknown as string,
+                initialAheadCount: () => undefined as unknown as string,
+                initialQueueLength: () => undefined as unknown as string,
+                initialEtaMs: () => undefined as unknown as string,
+                guestName: () => undefined as unknown as string,
+                partySize: () => undefined as unknown as string,
+              },
+            },
+            HostQueueScreen: {
+              path: 'host/:code',
+              parse: {
+                code: (code: string) => code,
+              },
+              stringify: {
+                code: (code: string) => code,
+                // Exclude sensitive params from URL
+                sessionId: () => undefined as unknown as string,
+                wsUrl: () => undefined as unknown as string,
+                hostAuthToken: () => undefined as unknown as string,
+                joinUrl: () => undefined as unknown as string,
+                eventName: () => undefined as unknown as string,
+                maxGuests: () => undefined as unknown as string,
+                location: () => undefined as unknown as string,
+                contactInfo: () => undefined as unknown as string,
+                openTime: () => undefined as unknown as string,
+                closeTime: () => undefined as unknown as string,
+                requiresAuth: () => undefined as unknown as string,
+              },
+            },
+            PrivacyPolicyScreen: 'privacy',
+            AdminDashboardScreen: 'admin',
+            HostDashboardScreen: 'my-queues',
+          },
         },
-        stringify: {
-          code: (code: string) => code,
-          // Exclude sensitive params from URL
-          partyId: () => undefined as unknown as string,
-          sessionId: () => undefined as unknown as string,
-          initialPosition: () => undefined as unknown as string,
-          initialAheadCount: () => undefined as unknown as string,
-          initialQueueLength: () => undefined as unknown as string,
-          initialEtaMs: () => undefined as unknown as string,
-          guestName: () => undefined as unknown as string,
-          partySize: () => undefined as unknown as string,
-        },
-      },
-      HostQueueScreen: {
-        path: 'host/:code',
-        parse: {
-          code: (code: string) => code,
-        },
-        stringify: {
-          code: (code: string) => code,
-          // Exclude sensitive params from URL
-          sessionId: () => undefined as unknown as string,
-          wsUrl: () => undefined as unknown as string,
-          hostAuthToken: () => undefined as unknown as string,
-          joinUrl: () => undefined as unknown as string,
-          eventName: () => undefined as unknown as string,
-          maxGuests: () => undefined as unknown as string,
-          location: () => undefined as unknown as string,
-          contactInfo: () => undefined as unknown as string,
-          openTime: () => undefined as unknown as string,
-          closeTime: () => undefined as unknown as string,
-          requiresAuth: () => undefined as unknown as string,
-        },
-      },
-      PrivacyPolicyScreen: 'privacy',
-      AdminDashboardScreen: 'admin',
-      HostDashboardScreen: 'my-queues',
-    },
-  },
-};
+      }
+    : undefined;
 
 const headerStyles = StyleSheet.create({
   headerRight: {
@@ -136,6 +139,11 @@ const headerStyles = StyleSheet.create({
   },
   backButton: {
     padding: 8,
+    marginLeft: 8,
+  },
+  backButtonSpacer: {
+    // Same width as backButton to keep header layout consistent
+    width: 38, // 22 (icon) + 8 (padding) + 8 (marginLeft)
     marginLeft: 8,
   },
   // Dropdown menu styles
@@ -208,7 +216,7 @@ const getScreenTitle = (screenName: string): string => {
 };
 
 function HeaderRight() {
-  const { user, isLoading, logout } = useAuth();
+  const { user, isLoading, isAdmin, logout } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [menuVisible, setMenuVisible] = useState(false);
 
@@ -232,7 +240,7 @@ function HeaderRight() {
           style={headerStyles.avatarButton}
           accessibilityRole="button"
           accessibilityLabel="Open user menu"
-          hitSlop={8}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           onPress={() => setMenuVisible(true)}>
           {avatarUrl ? (
             <Image
@@ -259,12 +267,41 @@ function HeaderRight() {
                 <Text style={headerStyles.menuUsername}>{displayName}</Text>
               </View>
 
+              {/* My Queues button */}
+              <Pressable
+                style={headerStyles.menuItem}
+                onPress={() => {
+                  setMenuVisible(false);
+                  navigation.navigate('HostDashboardScreen');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="My Queues">
+                <User size={18} color="#111" />
+                <Text style={headerStyles.menuItemText}>My Queues</Text>
+              </Pressable>
+
+              {/* Analytics Dashboard - Admin only */}
+              {isAdmin && (
+                <Pressable
+                  style={headerStyles.menuItem}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    navigation.navigate('AdminDashboardScreen');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Analytics Dashboard">
+                  <BarChart3 size={18} color="#111" />
+                  <Text style={headerStyles.menuItemText}>Analytics Dashboard</Text>
+                </Pressable>
+              )}
+
               {/* Logout button */}
               <Pressable
                 style={[headerStyles.menuItem, headerStyles.menuItemDestructive]}
-                onPress={() => {
+                onPress={async () => {
                   setMenuVisible(false);
-                  logout();
+                  await logout();
+                  navigation.navigate('HomeScreen');
                 }}
                 accessibilityRole="button"
                 accessibilityLabel="Log out">
@@ -287,7 +324,7 @@ function HeaderRight() {
         style={headerStyles.loginButton}
         accessibilityRole="button"
         accessibilityLabel="Log in"
-        hitSlop={8}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         onPress={() => navigation.navigate('LoginScreen')}>
         <Text style={headerStyles.loginButtonText}>Login</Text>
       </Pressable>
@@ -299,79 +336,132 @@ function AppNavigator() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
   const { showPopup, closePopup } = useAd();
 
+  // Only use documentTitle on web
+  const documentTitleConfig =
+    Platform.OS === 'web'
+      ? {
+          formatter: (_options: unknown, route: { name?: string } | undefined) =>
+            `QueueUp - ${getScreenTitle(route?.name ?? 'HomeScreen')}`,
+        }
+      : undefined;
+
   return (
-    <NavigationContainer
-      ref={navigationRef}
-      linking={linking}
-      documentTitle={{
-        formatter: (_options, route) =>
-          `QueueUp - ${getScreenTitle(route?.name ?? 'HomeScreen')}`,
-      }}>
+    <NavigationContainer ref={navigationRef} linking={linking} documentTitle={documentTitleConfig}>
       <StatusBar style="auto" />
       <View style={{ flex: 1 }}>
         <AdBanner variant="banner" />
         <Stack.Navigator
           initialRouteName="HomeScreen"
-          screenOptions={({ navigation, route }) => ({
-            headerRight: () => <HeaderRight />,
-            headerBackTitleVisible: false,
-            headerLeft: () => {
-              // HomeScreen is the root - no back button
-              if (route.name === 'HomeScreen') {
-                return null;
+          screenOptions={({ navigation, route }) => {
+            const isNative = Platform.OS !== 'web';
+            const isHomeScreen = route.name === 'HomeScreen';
+
+            // For HostQueueScreen, we need custom back behavior to go to HomeScreen
+            const isHostQueueScreen = route.name === 'HostQueueScreen';
+
+            // Base options for all screens
+            const baseOptions = {
+              headerRight: () => <HeaderRight />,
+              headerTitle: '',
+              headerTintColor: '#111',
+              // This sets what the NEXT screen's back button will say
+              headerBackTitle: 'Back',
+            };
+
+            // Native platforms: use native back button with proper animations
+            if (isNative) {
+              // HomeScreen: no back button
+              if (isHomeScreen) {
+                return {
+                  ...baseOptions,
+                  headerBackVisible: false,
+                  headerLeft: () => <View style={headerStyles.backButtonSpacer} />,
+                };
               }
 
-              // Determine the back navigation target
-              // HostQueueScreen should go back to HostDashboardScreen (My Queues)
-              // Other screens go back to HomeScreen or use native back if available
-              const handleBack = () => {
-                if (navigation.canGoBack()) {
-                  navigation.goBack();
-                } else if (route.name === 'HostQueueScreen') {
-                  // Host queue screens should go back to My Queues
-                  navigation.navigate('HostDashboardScreen');
-                } else {
-                  // All other screens go back to Home
-                  navigation.navigate('HomeScreen');
-                }
+              // All other screens: use native back button
+              return {
+                ...baseOptions,
+                headerBackVisible: true,
               };
+            }
 
-              return (
+            // Web: custom back button for all non-home screens
+            if (isHomeScreen) {
+              return {
+                ...baseOptions,
+                headerLeft: () => <View style={headerStyles.backButtonSpacer} />,
+              };
+            }
+
+            const handleBack = () => {
+              if (isHostQueueScreen) {
+                navigation.navigate('HomeScreen');
+              } else if (navigation.canGoBack()) {
+                navigation.goBack();
+              } else {
+                navigation.navigate('HomeScreen');
+              }
+            };
+
+            return {
+              ...baseOptions,
+              headerLeft: () => (
                 <Pressable
                   style={headerStyles.backButton}
                   accessibilityRole="button"
                   accessibilityLabel="Go back"
-                  hitSlop={12}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                   onPress={handleBack}>
                   <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
                 </Pressable>
-              );
-            },
-          })}>
-          <Stack.Screen name="HomeScreen" component={HomeScreen} options={{ title: '' }} />
-          <Stack.Screen name="LoginScreen" component={LoginScreen} options={{ title: '' }} />
-          <Stack.Screen name="MakeQueueScreen" component={MakeQueueScreen} options={{ title: '' }} />
-          <Stack.Screen name="JoinQueueScreen" component={JoinQueueScreen} options={{ title: '' }} />
+              ),
+            };
+          }}>
+          <Stack.Screen
+            name="HomeScreen"
+            component={HomeScreen}
+            options={{ headerBackTitle: 'Home' }}
+          />
+          <Stack.Screen
+            name="LoginScreen"
+            component={LoginScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="MakeQueueScreen"
+            component={MakeQueueScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="JoinQueueScreen"
+            component={JoinQueueScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
           <Stack.Screen
             name="GuestQueueScreen"
             component={GuestQueueScreen}
-            options={{ title: '' }}
+            options={{ headerBackTitle: 'Back' }}
           />
-          <Stack.Screen name="HostQueueScreen" component={HostQueueScreen} options={{ title: '' }} />
+          <Stack.Screen
+            name="HostQueueScreen"
+            component={HostQueueScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
           <Stack.Screen
             name="PrivacyPolicyScreen"
             component={PrivacyPolicyScreen}
-            options={{ title: '' }}
+            options={{ headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="AdminDashboardScreen"
             component={AdminDashboardScreen}
-            options={{ title: '' }}
+            options={{ headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="HostDashboardScreen"
             component={HostDashboardScreen}
-            options={{ title: '' }}
+            options={{ headerBackTitle: 'Back' }}
           />
         </Stack.Navigator>
         <AdPopup visible={showPopup} onClose={closePopup} />

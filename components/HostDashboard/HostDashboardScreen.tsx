@@ -89,7 +89,9 @@ export default function HostDashboardScreen({ navigation }: Props) {
       // Build the WebSocket URL from the queue code
       const wsUrl = buildHostWsUrlFromCode(queue.shortCode);
       const joinUrl =
-        typeof window !== 'undefined' ? `${window.location.origin}/queue/${queue.shortCode}` : undefined;
+        typeof window !== 'undefined' && window.location?.origin
+          ? `${window.location.origin}/queue/${queue.shortCode}`
+          : undefined;
 
       // Try to get the stored host auth token
       try {
@@ -157,11 +159,18 @@ export default function HostDashboardScreen({ navigation }: Props) {
         <View style={styles.loadingContainer}>
           <Text style={styles.title}>My Queues</Text>
           <Text style={styles.loadingText}>Please log in to view and manage your queues</Text>
-          <Pressable
-            style={styles.loginButton}
-            onPress={() => login('github', { returnTo: '/my-queues' })}>
-            <Text style={styles.loginButtonText}>Log in with GitHub</Text>
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Pressable
+              style={styles.loginButton}
+              onPress={() => login('github', { returnTo: '/my-queues' })}>
+              <Text style={styles.loginButtonText}>GitHub</Text>
+            </Pressable>
+            <Pressable
+              style={styles.loginButton}
+              onPress={() => login('google', { returnTo: '/my-queues' })}>
+              <Text style={styles.loginButtonText}>Google</Text>
+            </Pressable>
+          </View>
         </View>
       </SafeAreaProvider>
     );

@@ -21,6 +21,7 @@ import DateTimePicker, {
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Turnstile } from '@marsidev/react-turnstile';
+import TurnstileNative from '../TurnstileNative';
 import * as Location from 'expo-location';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './MakeQueueScreen.Styles';
@@ -483,6 +484,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
             contactInfo: created.contactInfo ?? (trimmedContact || undefined),
             openTime: created.openTime ?? openTimeValue,
             closeTime: created.closeTime ?? closeTimeValue,
+            requiresAuth: created.requiresAuth ?? (user ? requiresAuth : false),
             createdAt: Date.now(),
           });
         } catch (error) {
@@ -508,7 +510,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
       // Show interstitial-style ad popup on creation
       openPopup();
 
-      navigation.navigate('HostQueueScreen', {
+      navigation.replace('HostQueueScreen', {
         code: created.code,
         sessionId: created.sessionId,
         wsUrl: created.wsUrl,
@@ -556,7 +558,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const renderFormFields = () => (
     <>
       {/* Event Name */}
-      <Text style={styles.label}>Event Name<span style={{ color: 'red' }}> *</span></Text>
+      <Text style={styles.label}>
+        Event Name<span style={{ color: 'red' }}> *</span>
+      </Text>
       <TextInput
         placeholder="Dinner rush, pop-up, etc."
         value={eventName}
@@ -643,7 +647,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
       )}
 
       {/* Max Queue Size */}
-      <Text style={styles.label}>Max Queue Size<span style={{ color: 'red' }}> *</span></Text>
+      <Text style={styles.label}>
+        Max Queue Size<span style={{ color: 'red' }}> *</span>
+      </Text>
       <View style={styles.sliderRow}>
         <Text style={styles.sliderHint}>Allow up to</Text>
         <Text style={styles.sliderValue}>{maxSize}</Text>
@@ -662,7 +668,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
       />
 
       {/* Open Hours */}
-      <Text style={styles.label}>Open Hours<span style={{ color: 'red' }}> *</span></Text>
+      <Text style={styles.label}>
+        Open Hours<span style={{ color: 'red' }}> *</span>
+      </Text>
       {Platform.OS === 'web' ? (
         <View style={styles.timeRow}>
           {renderWebTimeInput('open', 'Opens')}
@@ -736,36 +744,55 @@ export default function MakeQueueScreen({ navigation }: Props) {
         </View>
       ) : null}
 
-      {/* Turnstile Widget */}
-      {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
+      {/* Turnstile Widget - Web requires env var, Native uses server config */}
+      {(isWeb ? process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY : true) ? (
         <View style={{ marginVertical: 16, alignItems: 'center' }}>
-          <Turnstile
-            ref={turnstileRef}
-            siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
-            onSuccess={(token) => {
-              console.log('[QueueUp][Turnstile] Token received');
-              setTurnstileToken(token);
-            }}
-            onError={(error) => {
-              console.error('[QueueUp][Turnstile] Error:', error);
-              setTurnstileToken(null);
-            }}
-            onExpire={() => {
-              console.warn('[QueueUp][Turnstile] Token expired');
-              setTurnstileToken(null);
-            }}
-            onWidgetLoad={(widgetId) => {
-              console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
-            }}
-            options={{
-              theme: 'light',
-              size: 'normal',
-            }}
-          />
+          {isWeb ? (
+            <Turnstile
+              ref={turnstileRef}
+              siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY!}
+              onSuccess={(token) => {
+                console.log('[QueueUp][Turnstile] Token received');
+                setTurnstileToken(token);
+              }}
+              onError={(error) => {
+                console.error('[QueueUp][Turnstile] Error:', error);
+                setTurnstileToken(null);
+              }}
+              onExpire={() => {
+                console.warn('[QueueUp][Turnstile] Token expired');
+                setTurnstileToken(null);
+              }}
+              onWidgetLoad={(widgetId) => {
+                console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
+              }}
+              options={{
+                theme: 'light',
+                size: 'normal',
+              }}
+            />
+          ) : (
+            <TurnstileNative
+              ref={turnstileRef}
+              onSuccess={(token) => {
+                console.log('[QueueUp][TurnstileNative] Token received');
+                setTurnstileToken(token);
+              }}
+              onError={(error) => {
+                console.error('[QueueUp][TurnstileNative] Error:', error);
+                setTurnstileToken(null);
+              }}
+              onExpire={() => {
+                console.warn('[QueueUp][TurnstileNative] Token expired');
+                setTurnstileToken(null);
+              }}
+              theme="light"
+            />
+          )}
         </View>
       ) : null}
 
-      {isWeb && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
+      {!turnstileToken ? (
         <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
           Complete the verification above to create queue
         </Text>
@@ -773,18 +800,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
 
       {/* Submit */}
       <Pressable
-        style={[
-          styles.button,
-          loading ||
-          (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
-            ? styles.buttonDisabled
-            : undefined,
-        ]}
+        style={[styles.button, loading || !turnstileToken ? styles.buttonDisabled : undefined]}
         onPress={onSubmit}
-        disabled={
-          loading ||
-          (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
-        }>
+        disabled={loading || !turnstileToken}>
         {loading ? (
           <ActivityIndicator color="#fff" />
         ) : (

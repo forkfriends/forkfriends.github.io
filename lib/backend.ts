@@ -51,6 +51,9 @@ const apiBaseUrlWithDefault = rawApiBaseUrl ?? DEFAULT_LOCALHOST;
 const apiBaseUrlSanitized = apiBaseUrlWithDefault ? apiBaseUrlWithDefault.replace(/\/$/, '') : '';
 export const API_BASE_URL = apiBaseUrlSanitized ?? '';
 
+const CLIENT_PLATFORM_HEADER = 'x-client-platform';
+const clientPlatformValue = Platform.OS;
+
 export interface CreateQueueResult {
   code: string;
   sessionId: string;
@@ -208,7 +211,7 @@ export async function joinQueue({
 
 async function buildJoinError(response: Response): Promise<JoinQueueError> {
   try {
-    const data = await response.json();
+    const data = await response.clone().json();
     const message = typeof data?.error === 'string' ? data.error : JSON.stringify(data);
     const error = new Error(
       message || `Request failed with status ${response.status}`
@@ -226,8 +229,12 @@ async function buildJoinError(response: Response): Promise<JoinQueueError> {
 
     return error;
   } catch {
-    const text = await response.text();
-    return new Error(text || `Request failed with status ${response.status}`) as JoinQueueError;
+    try {
+      const text = await response.clone().text();
+      return new Error(text || `Request failed with status ${response.status}`) as JoinQueueError;
+    } catch {
+      return new Error(`Request failed with status ${response.status}`) as JoinQueueError;
+    }
   }
 }
 
@@ -405,12 +412,16 @@ export async function closeQueueHost({ code, hostAuthToken }: CloseQueueParams):
 
 async function buildError(response: Response): Promise<Error> {
   try {
-    const data = await response.json();
+    const data = await response.clone().json();
     const message = typeof data?.error === 'string' ? data.error : JSON.stringify(data);
     return new Error(message || `Request failed with status ${response.status}`);
   } catch {
-    const text = await response.text();
-    return new Error(text || `Request failed with status ${response.status}`);
+    try {
+      const text = await response.clone().text();
+      return new Error(text || `Request failed with status ${response.status}`);
+    } catch {
+      return new Error(`Request failed with status ${response.status}`);
+    }
   }
 }
 

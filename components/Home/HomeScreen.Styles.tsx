@@ -2,6 +2,16 @@ import { StyleSheet } from 'react-native';
 
 export default StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#FAF9FA' },
+  scrollView: {
+    flex: 1,
+  },
+  scrollViewContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 40,
+    alignItems: 'center',
+  },
   container: {
     flex: 1,
     paddingHorizontal: 24,
@@ -30,8 +40,9 @@ export default StyleSheet.create({
     paddingLeft: 48,
     borderLeftWidth: 1,
     borderLeftColor: '#e6e6e6',
-    justifyContent: 'center',
-    overflow: 'scroll',
+  },
+  queuesSectionContent: {
+    paddingVertical: 24,
   },
   innerContainer: {
     width: '100%',

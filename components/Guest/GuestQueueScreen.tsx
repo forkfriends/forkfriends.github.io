@@ -11,7 +11,6 @@ import {
   TouchableOpacity,
   useWindowDimensions,
 } from 'react-native';
-import { ArrowLeft } from 'lucide-react-native';
 import { Bell, Check } from 'lucide-react-native';
 import { ChevronDown, ChevronUp } from 'lucide-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -38,26 +37,6 @@ const POLL_INTERVAL_MS = 10000;
 const ANALYTICS_SCREEN = 'guest_queue';
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
-  // Override the back button behavior to go to HomeScreen
-  const anonymousNames = ['Kuokat', 'Numbat', 'Quokka', 'Wombat', 'Bandicoot', 'Wallaby', 'Kangaroo', 'Dingoe', 'Possum', 'Tasmanian Devil', 'Dunnart', 'Bilby', 'Ostrich', 'Emu', 'Cassowary', 'Lyrebird', 'Kookaburra', 'Cockatoo', 'Frill-necked Lizard', 'Goanna', 'Skink', 'Taipan', 'Tapir', 'Capybara', 'Aardvark', 'Armadillo', 'Sloth', 'Meerkat', 'Mongoose', 'Fossa', 'Quoll', 'Sugar Glider', 'Flying Fox', 'Echidna', 'Platypus'];
-  useEffect(() => {
-    navigation.setOptions({
-      headerLeft: () => (
-        <Pressable
-          onPress={() => navigation.navigate('HomeScreen')}
-          accessibilityRole="button"
-          accessibilityLabel="Go home"
-          hitSlop={12}
-          style={({ pressed }) => ({
-            opacity: pressed ? 0.6 : 1,
-            padding: 8,
-            marginLeft: 8,
-          })}>
-          <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
-        </Pressable>
-      ),
-    });
-  }, [navigation]);
   const { showModal } = useModal();
   const {
     code,

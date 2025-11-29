@@ -14,9 +14,13 @@ import {
   useWindowDimensions,
   type GestureResponderEvent,
 } from 'react-native';
+import * as Sharing from 'expo-sharing';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Clipboard from 'expo-clipboard';
+import { File, Paths } from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+import QRCode from 'react-native-qrcode-svg';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './HostQueueScreen.Styles';
 import {
@@ -27,12 +31,13 @@ import {
   buildHostWsUrlFromCode,
 } from '../../lib/backend';
 import { Feather } from '@expo/vector-icons';
-import { ArrowLeft, Lock, Users } from 'lucide-react-native';
+import { Lock, Users } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
 import { useAuth } from '../../contexts/AuthContext';
 import Timer from '../Timer';
 import { trackEvent } from '../../utils/analytics';
 import { generatePosterImage } from './posterGenerator';
+import PosterNative, { PosterNativeHandle } from './PosterNative';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'HostQueueScreen'>;
 
@@ -101,6 +106,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     contactInfo: initialContactInfo,
     openTime: initialOpenTime,
     closeTime: initialCloseTime,
+    requiresAuth: initialRequiresAuth,
   } = route.params;
 
   // State for recovered params (when missing from route params on page refresh)
@@ -115,6 +121,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     contactInfo?: string | null;
     openTime?: string | null;
     closeTime?: string | null;
+    requiresAuth?: boolean;
   } | null>(null);
   const [isRecoveringParams, setIsRecoveringParams] = useState(!initialSessionId || !initialWsUrl);
 
@@ -127,6 +134,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const contactInfo = initialContactInfo ?? recoveredParams?.contactInfo;
   const openTime = initialOpenTime ?? recoveredParams?.openTime;
   const closeTime = initialCloseTime ?? recoveredParams?.closeTime;
+  const requiresAuth = initialRequiresAuth ?? recoveredParams?.requiresAuth ?? false;
 
   // Recover params from storage when missing (e.g., page refresh)
   useEffect(() => {
@@ -169,7 +177,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           // Build joinUrl from code if not present in storage
           const joinUrl =
             activeQueue.joinUrl ||
-            (typeof window !== 'undefined' ? `${window.location.origin}/queue/${code}` : undefined);
+            (typeof window !== 'undefined' && window.location?.origin
+              ? `${window.location.origin}/queue/${code}`
+              : undefined);
 
           // Set hostToken directly here to avoid race condition with isRecoveringParams
           if (hostAuthToken) {
@@ -187,6 +197,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
             contactInfo: activeQueue.contactInfo,
             openTime: activeQueue.openTime,
             closeTime: activeQueue.closeTime,
+            requiresAuth: activeQueue.requiresAuth,
           });
           setIsRecoveringParams(false);
         } else {
@@ -202,26 +213,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
 
     void recoverParams();
   }, [code, initialSessionId, initialWsUrl, navigation, isAuthenticated, isAuthLoading]);
-
-  // Override the back button behavior to go to HomeScreen
-  useEffect(() => {
-    navigation.setOptions({
-      headerLeft: () => (
-        <Pressable
-          onPress={() => navigation.navigate('HomeScreen')}
-          accessibilityRole="button"
-          accessibilityLabel="Go home"
-          hitSlop={12}
-          style={({ pressed }) => ({
-            opacity: pressed ? 0.6 : 1,
-            padding: 8,
-            marginLeft: 8,
-          })}>
-          <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
-        </Pressable>
-      ),
-    });
-  }, [navigation]);
 
   const storageKey = sessionId ? `queueup-host-auth:${sessionId}` : '';
   const storageCodeKey = code ? `queueup-host-auth-code:${code}` : '';
@@ -268,7 +259,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const [posterImageUrl, setPosterImageUrl] = useState<string | null>(null);
   const [posterBlackWhite, setPosterBlackWhite] = useState(false);
   const [posterGenerating, setPosterGenerating] = useState(false);
-  const canGeneratePoster = isWeb;
+  const posterNativeRef = useRef<PosterNativeHandle | null>(null);
+  const [nativeQrModalVisible, setNativeQrModalVisible] = useState(false);
+  const [savingQr, setSavingQr] = useState(false);
+  const qrCodeRef = useRef<any>(null);
+  const canGeneratePoster = true; // Web uses canvas, native uses view-shot
 
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -534,10 +529,12 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const queueCount = queue.length;
   const shareableLink = useMemo(() => {
     if (joinUrl) return joinUrl;
-    if (typeof window !== 'undefined') {
+    // On web, use current origin
+    if (typeof window !== 'undefined' && window.location?.origin) {
       return `${window.location.origin}/queue/${code}`;
     }
-    return null;
+    // On mobile, use production URL
+    return `https://forkfriends.github.io/queueup/queue/${code}`;
   }, [joinUrl, code]);
   // QR code URL includes src=qr param for tracking scans vs manual entry
   const qrCodeLink = useMemo(() => {
@@ -684,21 +681,31 @@ export default function HostQueueScreen({ route, navigation }: Props) {
 
   const handleGeneratePoster = useCallback(
     async (mode: 'color' | 'bw', forDownload: boolean = true) => {
-      if (!canGeneratePoster || typeof window === 'undefined') {
-        Alert.alert('Try on web', 'Poster downloads are only available in a web browser.');
-        return null;
-      }
       if (posterModeLoading) {
-        return null;
-      }
-      const doc = (globalThis as any)?.document;
-      if (!doc) {
-        Alert.alert('Unavailable', 'Poster downloads are only available in a web browser.');
         return null;
       }
       setPosterModeLoading(mode);
       setPosterGenerating(true);
       try {
+        if (!isWeb) {
+          setPosterBlackWhite(mode === 'bw');
+          const uri = await posterNativeRef.current?.capture();
+          if (uri) {
+            const normalized = uri.startsWith('file://') ? uri : `file://${uri}`;
+            setPosterImageUrl(normalized);
+            setPosterModalVisible(true);
+          } else {
+            Alert.alert('Poster unavailable', 'Unable to render poster on this device.');
+          }
+          return null;
+        }
+
+        const doc = (globalThis as any)?.document;
+        if (!doc) {
+          Alert.alert('Unavailable', 'Poster downloads are only available in a web browser.');
+          return null;
+        }
+
         const blob = await generatePosterImage({
           slug: code,
           joinUrl: qrCodeLink ?? undefined,
@@ -765,26 +772,112 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, [shareableLink, displayEventName, code, trackHostAction]);
 
   const handleViewQrCode = useCallback(async () => {
-    if (!canGeneratePoster) {
-      Alert.alert('Try on web', 'Poster viewing is only available in a web browser.');
-      return;
+    if (isWeb) {
+      // Web: use canvas-based poster generation
+      if (!canGeneratePoster) {
+        Alert.alert('Try on web', 'Poster viewing is only available in a web browser.');
+        return;
+      }
+      setPosterModalVisible(true);
+      setPosterImageUrl(null);
+      // Generate poster in current B&W mode
+      await handleGeneratePoster(posterBlackWhite ? 'bw' : 'color', false);
+    } else {
+      setPosterModalVisible(true);
+      setPosterImageUrl(null);
+      await handleGeneratePoster(posterBlackWhite ? 'bw' : 'color', false);
     }
-    setPosterModalVisible(true);
-    setPosterImageUrl(null);
-    // Generate poster in current B&W mode
-    await handleGeneratePoster(posterBlackWhite ? 'bw' : 'color', false);
-  }, [canGeneratePoster, handleGeneratePoster, posterBlackWhite]);
+  }, [isWeb, canGeneratePoster, handleGeneratePoster, posterBlackWhite]);
+
+  const handleCloseNativeQrModal = useCallback(() => {
+    setNativeQrModalVisible(false);
+  }, []);
+
+  const handleSaveQrCode = useCallback(async () => {
+    if (savingQr || !qrCodeRef.current) return;
+
+    setSavingQr(true);
+    try {
+      // Request permissions
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Please allow access to save photos to your gallery.');
+        setSavingQr(false);
+        return;
+      }
+
+      // Get the QR code as base64 data
+      qrCodeRef.current.toDataURL(async (dataUrl: string) => {
+        try {
+          const filename = `queueup-${code}-qr.png`;
+          const file = new File(Paths.cache, filename);
+
+          // Decode base64 and write to file
+          const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          await file.write(bytes);
+
+          // Save to media library
+          const asset = await MediaLibrary.createAssetAsync(file.uri);
+          await MediaLibrary.createAlbumAsync('QueueUp', asset, false);
+
+          if (Platform.OS === 'android') {
+            ToastAndroid.show('QR code saved to gallery', ToastAndroid.SHORT);
+          } else {
+            Alert.alert('Saved', 'QR code saved to your photo library.');
+          }
+
+          trackHostAction('qr_saved', { platform: Platform.OS, method: 'native_save' });
+        } catch (error) {
+          console.error('Failed to save QR code:', error);
+          Alert.alert('Save failed', 'Unable to save QR code. Please try again.');
+        } finally {
+          setSavingQr(false);
+        }
+      });
+    } catch (error) {
+      console.error('Failed to save QR code:', error);
+      Alert.alert('Save failed', 'Unable to save QR code. Please try again.');
+      setSavingQr(false);
+    }
+  }, [savingQr, code, trackHostAction]);
 
   const handleClosePosterModal = useCallback(() => {
     setPosterModalVisible(false);
-    if (posterImageUrl) {
+    if (posterImageUrl && isWeb) {
       URL.revokeObjectURL(posterImageUrl);
-      setPosterImageUrl(null);
     }
+    setPosterImageUrl(null);
   }, [posterImageUrl]);
 
   const handleDownloadPoster = useCallback(async () => {
-    if (!posterImageUrl || !canGeneratePoster || typeof window === 'undefined') {
+    if (!posterImageUrl || !canGeneratePoster) {
+      return;
+    }
+    if (!isWeb) {
+      try {
+        const available = await Sharing.isAvailableAsync();
+        if (!available) {
+          Alert.alert('Share unavailable', 'Sharing is not available on this device.');
+          return;
+        }
+        await Sharing.shareAsync(posterImageUrl, {
+          mimeType: 'image/png',
+          dialogTitle: 'Share queue poster',
+        });
+        trackHostAction('qr_saved', {
+          platform: Platform.OS,
+          method: 'poster_share',
+          mode: posterBlackWhite ? 'bw' : 'color',
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to share poster';
+        Alert.alert('Share failed', message);
+      }
       return;
     }
     const doc = (globalThis as any)?.document;
@@ -925,12 +1018,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     poll();
   }, [poll]);
 
-  // If auth state drops while on this screen, send user home to avoid stale host controls
+  // Only force-auth hosts back home when the queue requires authentication
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!requiresAuth) return;
+    if (!isAuthLoading && !isAuthenticated) {
       navigation.replace('HomeScreen');
     }
-  }, [isAuthenticated, navigation]);
+  }, [requiresAuth, isAuthLoading, isAuthenticated, navigation]);
 
   const renderQueueList = () => {
     if (queueCount === 0) {
@@ -1015,21 +1109,19 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         ) : null}
         {shareableLink ? (
           <View style={styles.posterButtons}>
-            {canGeneratePoster ? (
-              <Pressable
-                style={[
-                  styles.posterButton,
-                  posterGenerating ? styles.posterButtonDisabled : undefined,
-                ]}
-                onPress={handleViewQrCode}
-                disabled={posterGenerating}>
-                {posterGenerating ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.posterButtonText}>View QR Code</Text>
-                )}
-              </Pressable>
-            ) : null}
+            <Pressable
+              style={[
+                styles.posterButton,
+                posterGenerating ? styles.posterButtonDisabled : undefined,
+              ]}
+              onPress={handleViewQrCode}
+              disabled={posterGenerating}>
+              {posterGenerating ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.posterButtonText}>View QR Code</Text>
+              )}
+            </Pressable>
             <Pressable style={styles.posterButtonSecondary} onPress={handleShare}>
               <Feather name="share-2" size={18} color="#111" />
               <Text style={styles.posterButtonSecondaryText}>Share</Text>
@@ -1208,6 +1300,84 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     </Modal>
   );
 
+  // Native QR code modal (for iOS/Android)
+  const nativeQrModal = !isWeb ? (
+    <Modal
+      visible={nativeQrModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={handleCloseNativeQrModal}>
+      <View style={styles.posterModalBackdrop}>
+        <View style={styles.posterModalCard}>
+          <View style={styles.posterModalHeader}>
+            <Text style={styles.posterModalTitle}>QR Code</Text>
+            <Pressable onPress={handleCloseNativeQrModal} style={styles.posterModalCloseButton}>
+              <Feather name="x" size={24} color="#111" />
+            </Pressable>
+          </View>
+          <View style={styles.nativeQrContainer}>
+            {qrCodeLink ? (
+              <QRCode
+                value={qrCodeLink}
+                size={220}
+                backgroundColor="#fff"
+                color="#000"
+                getRef={(ref: any) => (qrCodeRef.current = ref)}
+              />
+            ) : null}
+            <Text style={styles.nativeQrCode}>{code}</Text>
+            {displayEventName ? (
+              <Text style={styles.nativeQrEventName} numberOfLines={2}>
+                {displayEventName}
+              </Text>
+            ) : null}
+            <Text style={styles.nativeQrHint}>Guests can scan this code to join your queue</Text>
+          </View>
+          <View style={styles.nativeQrActions}>
+            <Pressable
+              style={[styles.nativeQrSaveButton, savingQr && styles.posterButtonDisabled]}
+              onPress={handleSaveQrCode}
+              disabled={savingQr}>
+              {savingQr ? (
+                <ActivityIndicator color="#111" size="small" />
+              ) : (
+                <>
+                  <Feather name="download" size={18} color="#111" />
+                  <Text style={styles.nativeQrSaveText}>Save</Text>
+                </>
+              )}
+            </Pressable>
+            <Pressable style={styles.nativeQrShareButton} onPress={handleShare}>
+              <Feather name="share-2" size={18} color="#fff" />
+              <Text style={styles.posterModalDownloadText}>Share</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  ) : null;
+
+  const posterNativeHidden = !isWeb ? (
+    <View
+      style={{
+        position: 'absolute',
+        opacity: 0.01,
+        width: 1080,
+        height: 1920,
+        left: -2000,
+        top: -2000,
+        pointerEvents: 'none',
+      }}>
+      <PosterNative
+        ref={posterNativeRef}
+        joinUrl={qrCodeLink ?? shareableLink}
+        slug={code}
+        detailLines={buildPosterDetails()}
+        blackWhite={posterBlackWhite}
+      />
+    </View>
+  ) : null;
+
   const renderDesktopQueueList = () => {
     if (queueCount === 0) {
       return (
@@ -1299,21 +1469,19 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         ) : null}
         {shareableLink ? (
           <View style={styles.posterButtons}>
-            {canGeneratePoster ? (
-              <Pressable
-                style={[
-                  styles.posterButton,
-                  posterGenerating ? styles.posterButtonDisabled : undefined,
-                ]}
-                onPress={handleViewQrCode}
-                disabled={posterGenerating}>
-                {posterGenerating ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.posterButtonText}>View QR Code</Text>
-                )}
-              </Pressable>
-            ) : null}
+            <Pressable
+              style={[
+                styles.posterButton,
+                posterGenerating ? styles.posterButtonDisabled : undefined,
+              ]}
+              onPress={handleViewQrCode}
+              disabled={posterGenerating}>
+              {posterGenerating ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.posterButtonText}>View QR Code</Text>
+              )}
+            </Pressable>
             <Pressable style={styles.posterButtonSecondary} onPress={handleShare}>
               <Feather name="share-2" size={18} color="#111" />
               <Text style={styles.posterButtonSecondaryText}>Share</Text>
@@ -1384,9 +1552,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
 
   const modals = (
     <>
+      {posterNativeHidden}
       {webCloseModal}
       {posterModal}
       {connectionErrorModal}
+      {nativeQrModal}
     </>
   );
 

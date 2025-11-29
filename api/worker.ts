@@ -39,6 +39,7 @@ export interface Env {
   DB: D1Database;
   EVENTS: Queue;
   TURNSTILE_SECRET_KEY: string;
+  TURNSTILE_SITE_KEY?: string;
   HOST_AUTH_SECRET: string;
   VAPID_PUBLIC?: string;
   VAPID_PRIVATE?: string;
@@ -103,6 +104,76 @@ export default {
         }
         redirectUrl.searchParams.set('code', code);
         return Response.redirect(redirectUrl.toString(), 302);
+      }
+
+      // Turnstile Widget Page (for native apps) - served before CORS check
+      if (url.pathname === '/turnstile') {
+        // Use server-configured site key - don't accept from query params to prevent XSS
+        const siteKey = env.TURNSTILE_SITE_KEY || '';
+        if (!siteKey) {
+          return new Response('Turnstile not configured', { status: 503 });
+        }
+
+        // Validate theme parameter - only allow known values
+        const themeParam = url.searchParams.get('theme');
+        const theme = themeParam === 'dark' || themeParam === 'auto' ? themeParam : 'light';
+
+        const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; }
+    body { display: flex; justify-content: center; align-items: center; }
+    #turnstile-container { display: flex; justify-content: center; align-items: center; }
+    .loading { color: #666; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; }
+  </style>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad" async defer></script>
+</head>
+<body>
+  <div id="turnstile-container">
+    <div class="loading">Loading...</div>
+  </div>
+  <script>
+    function postMessage(data) {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(data));
+      }
+    }
+    function onTurnstileLoad() {
+      postMessage({ type: 'log', message: 'Turnstile script loaded' });
+      var container = document.getElementById('turnstile-container');
+      container.innerHTML = '';
+      try {
+        turnstile.render(container, {
+          sitekey: '${siteKey}',
+          theme: '${theme}',
+          callback: function(token) { postMessage({ type: 'success', token: token }); },
+          'error-callback': function(error) { postMessage({ type: 'error', error: error || 'Unknown error' }); },
+          'expired-callback': function() { postMessage({ type: 'expire' }); }
+        });
+        postMessage({ type: 'ready' });
+      } catch (e) {
+        postMessage({ type: 'error', error: e.message || 'Failed to render widget' });
+      }
+    }
+    setTimeout(function() {
+      if (typeof turnstile === 'undefined') {
+        postMessage({ type: 'error', error: 'Turnstile script failed to load' });
+      }
+    }, 10000);
+  </script>
+</body>
+</html>`;
+
+        return new Response(html, {
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-cache',
+          },
+        });
       }
     }
 
@@ -247,7 +318,56 @@ export default {
           if (stateData.returnTo) {
             fragmentParams.set('return_to', stateData.returnTo);
           }
-          const redirectUrl = `${successUrl.origin}${successUrl.pathname}#${fragmentParams.toString()}`;
+
+          // For custom schemes (exp://, queueup://), URL.origin returns 'null' (as string)
+          // so we need to construct the base URL manually
+          const baseUrl =
+            successUrl.origin !== 'null' && successUrl.origin
+              ? `${successUrl.origin}${successUrl.pathname}`
+              : `${successUrl.protocol}//${successUrl.host}${successUrl.pathname}`;
+          const redirectUrl = `${baseUrl}#${fragmentParams.toString()}`;
+
+          // For native apps with custom schemes (exp://, queueup://), browsers can't redirect directly.
+          // We need to return an HTML page that triggers the redirect via JavaScript.
+          const isCustomScheme =
+            successUrl.protocol === 'exp:' || successUrl.protocol === 'queueup:';
+
+          if (isCustomScheme) {
+            // Return an HTML page that redirects to the custom scheme
+            const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Redirecting...</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
+    .container { text-align: center; padding: 20px; }
+    .spinner { width: 40px; height: 40px; border: 3px solid #ddd; border-top-color: #333; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    a { color: #007AFF; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="spinner"></div>
+    <p>Redirecting back to the app...</p>
+    <p><a href="${redirectUrl}" id="link">Click here if not redirected</a></p>
+  </div>
+  <script>
+    window.location.href = "${redirectUrl}";
+  </script>
+</body>
+</html>`;
+            return new Response(html, {
+              status: 200,
+              headers: {
+                'Content-Type': 'text/html; charset=utf-8',
+                'Cache-Control': 'no-store',
+              },
+            });
+          }
+
           return Response.redirect(redirectUrl, 302);
         }
 
@@ -423,7 +543,56 @@ export default {
           if (stateData.returnTo) {
             fragmentParams.set('return_to', stateData.returnTo);
           }
-          const redirectUrl = `${successUrl.origin}${successUrl.pathname}#${fragmentParams.toString()}`;
+
+          // For custom schemes (exp://, queueup://), URL.origin returns 'null' (as string)
+          // so we need to construct the base URL manually
+          const baseUrl =
+            successUrl.origin !== 'null' && successUrl.origin
+              ? `${successUrl.origin}${successUrl.pathname}`
+              : `${successUrl.protocol}//${successUrl.host}${successUrl.pathname}`;
+          const redirectUrl = `${baseUrl}#${fragmentParams.toString()}`;
+
+          // For native apps with custom schemes (exp://, queueup://), browsers can't redirect directly.
+          // We need to return an HTML page that triggers the redirect via JavaScript.
+          const isCustomScheme =
+            successUrl.protocol === 'exp:' || successUrl.protocol === 'queueup:';
+
+          if (isCustomScheme) {
+            // Return an HTML page that redirects to the custom scheme
+            const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Redirecting...</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
+    .container { text-align: center; padding: 20px; }
+    .spinner { width: 40px; height: 40px; border: 3px solid #ddd; border-top-color: #333; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    a { color: #007AFF; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="spinner"></div>
+    <p>Redirecting back to the app...</p>
+    <p><a href="${redirectUrl}" id="link">Click here if not redirected</a></p>
+  </div>
+  <script>
+    window.location.href = "${redirectUrl}";
+  </script>
+</body>
+</html>`;
+            return new Response(html, {
+              status: 200,
+              headers: {
+                'Content-Type': 'text/html; charset=utf-8',
+                'Cache-Control': 'no-store',
+              },
+            });
+          }
+
           return Response.redirect(redirectUrl, 302);
         }
 
@@ -2286,19 +2455,24 @@ async function handleCreate(
   // Turnstile verification
   const turnstileToken = (payload as any).turnstileToken;
   const remoteIp = request.headers.get('CF-Connecting-IP') ?? undefined;
+  const clientPlatform = request.headers.get('x-client-platform') ?? 'web';
   const turnstileEnabled =
     env.TURNSTILE_BYPASS !== 'true' &&
     env.TURNSTILE_SECRET_KEY &&
     env.TURNSTILE_SECRET_KEY.trim().length > 0;
+  const turnstileRequired = turnstileEnabled && clientPlatform === 'web';
 
   console.log('[handleCreate] Turnstile check:', {
     enabled: turnstileEnabled,
+    required: turnstileRequired,
     bypass: env.TURNSTILE_BYPASS,
     hasSecret: !!env.TURNSTILE_SECRET_KEY,
     hasToken: !!turnstileToken,
+    clientPlatform,
+    tokenPreview: turnstileToken?.substring(0, 20),
   });
 
-  if (turnstileEnabled) {
+  if (turnstileRequired) {
     if (
       !turnstileToken ||
       typeof turnstileToken !== 'string' ||
@@ -2528,20 +2702,25 @@ async function handleJoin(request: Request, env: Env, sessionId: string): Promis
   }
 
   const remoteIp = request.headers.get('CF-Connecting-IP') ?? undefined;
+  const clientPlatform = request.headers.get('x-client-platform') ?? 'web';
   const turnstileEnabled =
     env.TURNSTILE_BYPASS !== 'true' &&
     env.TURNSTILE_SECRET_KEY &&
     env.TURNSTILE_SECRET_KEY.trim().length > 0;
+  const turnstileRequired = turnstileEnabled && clientPlatform === 'web';
 
   console.log('[handleJoin] Turnstile check:', {
     enabled: turnstileEnabled,
+    required: turnstileRequired,
     bypass: env.TURNSTILE_BYPASS,
     hasSecret: !!env.TURNSTILE_SECRET_KEY,
     hasToken: !!turnstileToken,
+    clientPlatform,
+    tokenPreview: turnstileToken?.substring(0, 20),
   });
 
   // If Turnstile is enabled, require a valid token
-  if (turnstileEnabled) {
+  if (turnstileRequired) {
     if (
       !turnstileToken ||
       typeof turnstileToken !== 'string' ||

@@ -8,6 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ALLOWED_ORIGINS = "https://forkfriends.github.io, http://localhost:8081, http://localhost:19006"
+TURNSTILE_SITE_KEY = "0x4AAAAAAB5iY8b1rIknIZcN"
 
 [triggers]
 crons = ["*/15 * * * *"]

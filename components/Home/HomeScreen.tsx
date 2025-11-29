@@ -1,5 +1,13 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Image, Pressable, Platform, useWindowDimensions } from 'react-native';
+import {
+  View,
+  Text,
+  Image,
+  Pressable,
+  Platform,
+  ScrollView,
+  useWindowDimensions,
+} from 'react-native';
 import { storage } from '../../utils/storage';
 import type { StoredQueue, StoredJoinedQueue } from '../../utils/storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -14,6 +22,10 @@ type Props = NativeStackScreenProps<RootStackParamList, 'HomeScreen'>;
 
 const DESKTOP_BREAKPOINT = 900;
 
+// Icon source for the logo - use PNG for native (SVG not supported), SVG for web
+const logoSource =
+  Platform.OS === 'web' ? { uri: '/icon-black.svg' } : require('@assets/icon-black.png');
+
 export default function HomeScreen({ navigation, route }: Props) {
   const { user, isAuthenticated } = useAuth();
   const { showModal } = useModal();
@@ -27,28 +39,31 @@ export default function HomeScreen({ navigation, route }: Props) {
   const [joinedQueues, setJoinedQueues] = React.useState<StoredJoinedQueue[]>([]);
 
   // Check for active queue on mount and when returning to screen
-  const checkForQueues = React.useCallback(async () => {
-    try {
-      const [storedQueues, storedJoinedQueues] = await Promise.all([
-        storage.getActiveQueues(isAuthenticated),
-        storage.getJoinedQueues(isAuthenticated),
-      ]);
+  const checkForQueues = React.useCallback(
+    async (forceRefresh = false) => {
+      try {
+        const [storedQueues, storedJoinedQueues] = await Promise.all([
+          storage.getActiveQueues(isAuthenticated, forceRefresh),
+          storage.getJoinedQueues(isAuthenticated, forceRefresh),
+        ]);
 
-      console.log(
-        'Checking for stored queues:',
-        storedQueues.length ? `Found ${storedQueues.length} hosted` : 'No hosted queues',
-        storedJoinedQueues.length ? `, ${storedJoinedQueues.length} joined` : ', no joined queues'
-      );
+        console.log(
+          'Checking for stored queues:',
+          storedQueues.length ? `Found ${storedQueues.length} hosted` : 'No hosted queues',
+          storedJoinedQueues.length ? `, ${storedJoinedQueues.length} joined` : ', no joined queues'
+        );
 
-      // Sort queues by creation time, newest first
-      setActiveQueues(storedQueues.sort((a, b) => b.createdAt - a.createdAt));
-      setJoinedQueues(storedJoinedQueues.sort((a, b) => b.joinedAt - a.joinedAt));
-    } catch (error) {
-      console.error('Error checking for queues:', error);
-      setActiveQueues([]);
-      setJoinedQueues([]);
-    }
-  }, [isAuthenticated]);
+        // Sort queues by creation time, newest first
+        setActiveQueues(storedQueues.sort((a, b) => b.createdAt - a.createdAt));
+        setJoinedQueues(storedJoinedQueues.sort((a, b) => b.joinedAt - a.joinedAt));
+      } catch (error) {
+        console.error('Error checking for queues:', error);
+        setActiveQueues([]);
+        setJoinedQueues([]);
+      }
+    },
+    [isAuthenticated]
+  );
 
   // Load queues only once on mount
   React.useEffect(() => {
@@ -63,44 +78,24 @@ export default function HomeScreen({ navigation, route }: Props) {
     if (initialLoadDoneRef.current) {
       // Force refresh to get server data when auth state changes
       storage.invalidateCache();
-      void checkForQueues();
+      void checkForQueues(true);
     }
   }, [isAuthenticated, checkForQueues]);
 
-  // Only reload queues when returning from GuestQueueScreen if storage has changed
+  // Reload queues whenever this screen regains focus
   React.useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      // Check if the stored queues have changed
-      const checkStoredQueues = async () => {
-        try {
-          const storedJoinedQueues = await storage.getJoinedQueues(isAuthenticated);
-          const currentCodes = new Set(joinedQueues.map((q) => q.code));
-          const storedCodes = new Set(storedJoinedQueues.map((q) => q.code));
-
-          // Only reload if the stored queues are different from our current state
-          if (
-            storedCodes.size !== currentCodes.size ||
-            storedJoinedQueues.some((q) => !currentCodes.has(q.code)) ||
-            joinedQueues.some((q) => !storedCodes.has(q.code))
-          ) {
-            void checkForQueues();
-          }
-        } catch (error) {
-          console.warn('Error checking stored queues:', error);
-        }
-      };
-
-      void checkStoredQueues();
+      void checkForQueues(true);
     });
 
     return unsubscribe;
-  }, [navigation, checkForQueues, joinedQueues, isAuthenticated]);
+  }, [navigation, checkForQueues]);
 
   useEffect(() => {
     if (handledPrefillRef.current) {
       return;
     }
-    if (Platform.OS !== 'web') {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.location?.origin) {
       return;
     }
     const search = window.location.search;
@@ -145,7 +140,7 @@ export default function HomeScreen({ navigation, route }: Props) {
           <View style={styles.heroSection}>
             <View style={[styles.titleContainer, styles.titleContainerDesktop]}>
               <Image
-                source={{ uri: '/icon-black.svg' }}
+                source={logoSource}
                 style={[styles.logoIcon, styles.logoIconDesktop]}
                 resizeMode="contain"
               />
@@ -181,14 +176,14 @@ export default function HomeScreen({ navigation, route }: Props) {
               <Pressable onPress={() => navigation.navigate('PrivacyPolicyScreen')}>
                 <Text style={styles.privacyLink}>Privacy Policy</Text>
               </Pressable>
-              <Pressable onPress={() => navigation.navigate('AdminDashboardScreen')}>
-                <Text style={styles.privacyLink}>Analytics Dashboard</Text>
-              </Pressable>
             </View>
           </View>
 
           {/* Right: Queue lists */}
-          <View style={styles.queuesSection}>
+          <ScrollView
+            style={styles.queuesSection}
+            contentContainerStyle={styles.queuesSectionContent}
+            showsVerticalScrollIndicator={false}>
             {joinedQueues.length > 0 && (
               <View style={[styles.sectionContainer, styles.sectionContainerDesktop]}>
                 <Text style={styles.sectionTitle}>Joined Queues</Text>
@@ -230,6 +225,7 @@ export default function HomeScreen({ navigation, route }: Props) {
                         contactInfo: queue.contactInfo,
                         openTime: queue.openTime,
                         closeTime: queue.closeTime,
+                        requiresAuth: queue.requiresAuth ?? false,
                       });
                     }}>
                     <Text style={styles.queueCardTitle}>
@@ -246,9 +242,7 @@ export default function HomeScreen({ navigation, route }: Props) {
                 Your active queues will appear here once you create or join one.
               </Text>
             )}
-
-            <AdBanner />
-          </View>
+          </ScrollView>
         </View>
       </SafeAreaProvider>
     );
@@ -257,29 +251,14 @@ export default function HomeScreen({ navigation, route }: Props) {
   // Mobile layout: single column
   return (
     <SafeAreaProvider style={styles.safe}>
-      <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollViewContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
         <View style={styles.innerContainer}>
           <View style={styles.titleContainer}>
-            {Platform.OS === 'web' ? (
-              <Image
-                source={{
-                  uri:
-                    typeof window !== 'undefined' &&
-                    (window.location.hostname === 'localhost' ||
-                      window.location.hostname === '127.0.0.1')
-                      ? '/icon-black.svg'
-                      : '/icon-black.svg',
-                }}
-                style={styles.logoIcon}
-                resizeMode="contain"
-              />
-            ) : (
-              <Image
-                source={require('@assets/ff_logo.png')}
-                style={styles.logoIcon}
-                resizeMode="contain"
-              />
-            )}
+            <Image source={logoSource} style={styles.logoIcon} resizeMode="contain" />
             <Text style={styles.title}>QueueUp</Text>
           </View>
 
@@ -349,6 +328,7 @@ export default function HomeScreen({ navigation, route }: Props) {
                       contactInfo: queue.contactInfo,
                       openTime: queue.openTime,
                       closeTime: queue.closeTime,
+                      requiresAuth: queue.requiresAuth ?? false,
                     });
                   }}>
                   <Text style={styles.buttonText}>
@@ -362,14 +342,8 @@ export default function HomeScreen({ navigation, route }: Props) {
           <Pressable onPress={() => navigation.navigate('PrivacyPolicyScreen')}>
             <Text style={styles.privacyLink}>Privacy Policy</Text>
           </Pressable>
-
-          <Pressable onPress={() => navigation.navigate('AdminDashboardScreen')}>
-            <Text style={styles.privacyLink}>Analytics Dashboard</Text>
-          </Pressable>
-
-          <AdBanner />
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaProvider>
   );
 }

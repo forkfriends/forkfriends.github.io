@@ -15,7 +15,6 @@ import Slider from '@react-native-community/slider';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
-import { Turnstile } from '@marsidev/react-turnstile';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './JoinQueueScreen.Styles';
 import {
@@ -33,7 +32,15 @@ import { storage } from '../../utils/storage';
 import { useModal } from '../../contexts/ModalContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAd } from '../../contexts/AdContext';
-import { ArrowLeft, Bell, BellRing, Smartphone, Users } from 'lucide-react-native';
+import { Bell, BellRing, Smartphone, Users } from 'lucide-react-native';
+import TurnstileNative from '../TurnstileNative';
+
+// Web-only Turnstile import
+const TurnstileWeb =
+  Platform.OS === 'web'
+    ? // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('@marsidev/react-turnstile').Turnstile
+    : null;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinQueueScreen'>;
 
@@ -249,17 +256,22 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
 
       // Check if queue requires authentication
       if (joinError.requiresAuth) {
+        const returnTo = `/join/${trimmed}`;
         showModal({
           title: 'Login Required',
           message: 'This queue requires you to sign in before joining.',
           buttons: [
             { text: 'Cancel', style: 'cancel', onPress: () => {} },
             {
-              text: 'Sign In',
+              text: 'GitHub',
               onPress: () => {
-                // Build the return URL to come back to this join screen with the code
-                const returnTo = `/join/${trimmed}`;
                 login('github', { returnTo });
+              },
+            },
+            {
+              text: 'Google',
+              onPress: () => {
+                login('google', { returnTo });
               },
             },
           ],
@@ -309,10 +321,24 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           });
         }
       } else {
-        showModal({
-          title: 'Unable to join queue',
-          message,
-        });
+        const normalized = message.toLowerCase();
+        if (
+          normalized.includes('not found') ||
+          normalized.includes('does not exist') ||
+          normalized.includes('unknown queue') ||
+          normalized.includes('invalid queue') ||
+          normalized.includes('no active queue')
+        ) {
+          showModal({
+            title: 'Queue not found',
+            message: 'We couldn’t find that queue. Double-check the 6-letter code and try again.',
+          });
+        } else {
+          showModal({
+            title: 'Unable to join queue',
+            message,
+          });
+        }
       }
 
       // Reset Turnstile on error
@@ -889,35 +915,55 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
         onValueChange={(value) => setPartySize(Math.round(value))}
       />
 
-      {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY ? (
+      {/* Turnstile Widget - Web requires env var, Native uses server config */}
+      {!inQueue && (isWeb ? process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY : true) ? (
         <View style={{ marginVertical: 16, alignItems: 'center' }}>
-          <Turnstile
-            ref={turnstileRef}
-            siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY}
-            onSuccess={(token) => {
-              console.log('[QueueUp][Turnstile] Token received');
-              setTurnstileToken(token);
-            }}
-            onError={(error) => {
-              console.error('[QueueUp][Turnstile] Error:', error);
-              setTurnstileToken(null);
-            }}
-            onExpire={() => {
-              console.warn('[QueueUp][Turnstile] Token expired');
-              setTurnstileToken(null);
-            }}
-            onWidgetLoad={(widgetId) => {
-              console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
-            }}
-            options={{
-              theme: 'light',
-              size: 'normal',
-            }}
-          />
+          {isWeb && TurnstileWeb ? (
+            <TurnstileWeb
+              ref={turnstileRef}
+              siteKey={process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY!}
+              onSuccess={(token: string) => {
+                console.log('[QueueUp][Turnstile] Token received');
+                setTurnstileToken(token);
+              }}
+              onError={(error: unknown) => {
+                console.error('[QueueUp][Turnstile] Error:', error);
+                setTurnstileToken(null);
+              }}
+              onExpire={() => {
+                console.warn('[QueueUp][Turnstile] Token expired');
+                setTurnstileToken(null);
+              }}
+              onWidgetLoad={(widgetId: string) => {
+                console.log('[QueueUp][Turnstile] Widget loaded:', widgetId);
+              }}
+              options={{
+                theme: 'light',
+                size: 'normal',
+              }}
+            />
+          ) : (
+            <TurnstileNative
+              ref={turnstileRef}
+              onSuccess={(token) => {
+                console.log('[QueueUp][TurnstileNative] Token received');
+                setTurnstileToken(token);
+              }}
+              onError={(error) => {
+                console.error('[QueueUp][TurnstileNative] Error:', error);
+                setTurnstileToken(null);
+              }}
+              onExpire={() => {
+                console.warn('[QueueUp][TurnstileNative] Token expired');
+                setTurnstileToken(null);
+              }}
+              theme="light"
+            />
+          )}
         </View>
       ) : null}
 
-      {isWeb && !inQueue && process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY && !turnstileToken ? (
+      {!inQueue && !turnstileToken ? (
         <Text style={{ textAlign: 'center', color: '#586069', fontSize: 14, marginBottom: 12 }}>
           Complete the verification above to join
         </Text>
@@ -937,19 +983,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
           </Pressable>
         ) : (
           <Pressable
-            style={[
-              styles.button,
-              loading ||
-              (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
-                ? styles.buttonDisabled
-                : undefined,
-            ]}
+            style={[styles.button, loading || !turnstileToken ? styles.buttonDisabled : undefined]}
             onPress={onSubmit}
-            disabled={
-              loading ||
-              inQueue ||
-              (isWeb && Boolean(process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY) && !turnstileToken)
-            }>
+            disabled={loading || inQueue || !turnstileToken}>
             {loading ? (
               <ActivityIndicator color="#fff" />
             ) : (
