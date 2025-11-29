@@ -40,7 +40,9 @@ export default StyleSheet.create({
     paddingLeft: 48,
     borderLeftWidth: 1,
     borderLeftColor: '#e6e6e6',
-    justifyContent: 'center',
+  },
+  queuesSectionContent: {
+    paddingVertical: 24,
   },
   innerContainer: {
     width: '100%',

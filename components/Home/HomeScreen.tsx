@@ -182,7 +182,10 @@ export default function HomeScreen({ navigation, route }: Props) {
           </View>
 
           {/* Right: Queue lists */}
-          <View style={styles.queuesSection}>
+          <ScrollView
+            style={styles.queuesSection}
+            contentContainerStyle={styles.queuesSectionContent}
+            showsVerticalScrollIndicator={false}>
             {joinedQueues.length > 0 && (
               <View style={[styles.sectionContainer, styles.sectionContainerDesktop]}>
                 <Text style={styles.sectionTitle}>Joined Queues</Text>
@@ -241,7 +244,7 @@ export default function HomeScreen({ navigation, route }: Props) {
                 Your active queues will appear here once you create or join one.
               </Text>
             )}
-          </View>
+          </ScrollView>
         </View>
       </SafeAreaProvider>
     );
