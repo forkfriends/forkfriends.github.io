@@ -210,9 +210,8 @@ export async function joinQueue({
 }
 
 async function buildJoinError(response: Response): Promise<JoinQueueError> {
-  const clone = response.clone(); // allow multiple reads safely
   try {
-    const data = await clone.json();
+    const data = await response.clone().json();
     const message = typeof data?.error === 'string' ? data.error : JSON.stringify(data);
     const error = new Error(
       message || `Request failed with status ${response.status}`
@@ -230,8 +229,12 @@ async function buildJoinError(response: Response): Promise<JoinQueueError> {
 
     return error;
   } catch {
-    const text = await clone.text();
-    return new Error(text || `Request failed with status ${response.status}`) as JoinQueueError;
+    try {
+      const text = await response.clone().text();
+      return new Error(text || `Request failed with status ${response.status}`) as JoinQueueError;
+    } catch {
+      return new Error(`Request failed with status ${response.status}`) as JoinQueueError;
+    }
   }
 }
 
@@ -409,12 +412,16 @@ export async function closeQueueHost({ code, hostAuthToken }: CloseQueueParams):
 
 async function buildError(response: Response): Promise<Error> {
   try {
-    const data = await response.json();
+    const data = await response.clone().json();
     const message = typeof data?.error === 'string' ? data.error : JSON.stringify(data);
     return new Error(message || `Request failed with status ${response.status}`);
   } catch {
-    const text = await response.text();
-    return new Error(text || `Request failed with status ${response.status}`);
+    try {
+      const text = await response.clone().text();
+      return new Error(text || `Request failed with status ${response.status}`);
+    } catch {
+      return new Error(`Request failed with status ${response.status}`);
+    }
   }
 }
 
