@@ -18,7 +18,7 @@ import {
   Text,
   Modal,
 } from 'react-native';
-import { ArrowLeft, LogOut, User } from 'lucide-react-native';
+import { ArrowLeft, LogOut, User, BarChart3 } from 'lucide-react-native';
 import './global.css';
 
 import HomeScreen from './components/Home/HomeScreen';
@@ -213,7 +213,7 @@ const getScreenTitle = (screenName: string): string => {
 };
 
 function HeaderRight() {
-  const { user, isLoading, logout } = useAuth();
+  const { user, isLoading, isAdmin, logout } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [menuVisible, setMenuVisible] = useState(false);
 
@@ -276,6 +276,21 @@ function HeaderRight() {
                 <User size={18} color="#111" />
                 <Text style={headerStyles.menuItemText}>My Queues</Text>
               </Pressable>
+
+              {/* Analytics Dashboard - Admin only */}
+              {isAdmin && (
+                <Pressable
+                  style={headerStyles.menuItem}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    navigation.navigate('AdminDashboardScreen');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Analytics Dashboard">
+                  <BarChart3 size={18} color="#111" />
+                  <Text style={headerStyles.menuItemText}>Analytics Dashboard</Text>
+                </Pressable>
+              )}
 
               {/* Logout button */}
               <Pressable

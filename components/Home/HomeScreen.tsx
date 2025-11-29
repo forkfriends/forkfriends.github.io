@@ -175,9 +175,6 @@ export default function HomeScreen({ navigation, route }: Props) {
               <Pressable onPress={() => navigation.navigate('PrivacyPolicyScreen')}>
                 <Text style={styles.privacyLink}>Privacy Policy</Text>
               </Pressable>
-              <Pressable onPress={() => navigation.navigate('AdminDashboardScreen')}>
-                <Text style={styles.privacyLink}>Analytics Dashboard</Text>
-              </Pressable>
             </View>
           </View>
 
@@ -343,10 +340,6 @@ export default function HomeScreen({ navigation, route }: Props) {
 
           <Pressable onPress={() => navigation.navigate('PrivacyPolicyScreen')}>
             <Text style={styles.privacyLink}>Privacy Policy</Text>
-          </Pressable>
-
-          <Pressable onPress={() => navigation.navigate('AdminDashboardScreen')}>
-            <Text style={styles.privacyLink}>Analytics Dashboard</Text>
           </Pressable>
         </View>
       </ScrollView>
