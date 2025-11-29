@@ -43,6 +43,9 @@ const ALLOWED_REDIRECT_URIS = [
   'queueup://auth/callback',
 ];
 
+// Pattern for Expo Go development URLs (exp://IP:PORT/--/path)
+const EXPO_GO_PATTERN = /^exp:\/\/[\d.]+:\d+\/--\/auth\/callback$/;
+
 export interface GitHubUser {
   id: number;
   login: string;
@@ -751,6 +754,12 @@ export function getSessionFromRequest(request: Request): string | null {
  */
 export function isValidRedirectUri(uri: string): boolean {
   try {
+    // Check for Expo Go development URLs (exp://IP:PORT/--/auth/callback)
+    // These are only valid during development
+    if (EXPO_GO_PATTERN.test(uri)) {
+      return true;
+    }
+
     const parsedUri = new URL(uri);
     return ALLOWED_REDIRECT_URIS.some((allowed) => {
       const parsedAllowed = new URL(allowed);
