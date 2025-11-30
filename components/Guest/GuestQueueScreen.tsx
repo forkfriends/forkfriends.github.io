@@ -29,6 +29,7 @@ import { trackEvent, trackTrustSurveySubmitted } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import Timer from '../Timer';
 import { useModal } from '../../contexts/ModalContext';
+import AdBanner from '../Ads/AdBanner';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GuestQueueScreen'>;
 
@@ -37,6 +38,7 @@ const POLL_INTERVAL_MS = 10000;
 const ANALYTICS_SCREEN = 'guest_queue';
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
+  const anonymousNames = ['Kangaroo', 'Panda', 'Penguin', 'Dolphin', 'Elephant', 'Giraffe', 'Tiger', 'Zebra', 'Koala', 'Otter', 'Quokka', 'Lemur', 'Meerkat', 'Sloth', 'Armadillo', 'Hedgehog', 'Raccoon', 'Chameleon', 'Flamingo', 'Pelican', 'Ostrich', 'Ewe', 'Ibex', 'Lynx', 'Marmot', 'Narwhal'];
   const { showModal } = useModal();
   const {
     code,
@@ -949,6 +951,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             <Text style={styles.leaveButtonText}>Leave Queue</Text>
           )}
         </Pressable>
+        <AdBanner variant='square' />
       </View>
     );
   };

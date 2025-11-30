@@ -85,7 +85,7 @@ function serializeTime(date: Date): string {
 
 export default function MakeQueueScreen({ navigation }: Props) {
   const { user } = useAuth();
-  const { openPopup } = useAd();
+  // const { openPopup } = useAd();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
   const [eventName, setEventName] = useState('');
@@ -508,7 +508,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
       }
 
       // Show interstitial-style ad popup on creation
-      openPopup();
+      // openPopup();
 
       navigation.replace('HostQueueScreen', {
         code: created.code,

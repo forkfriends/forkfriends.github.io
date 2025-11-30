@@ -53,7 +53,7 @@ const ANALYTICS_SCREEN = 'join_queue';
 export default function JoinQueueScreen({ navigation, route }: Props) {
   const { showModal } = useModal();
   const { login } = useAuth();
-  const { openPopup } = useAd();
+  // const { openPopup } = useAd();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
   const routeCode =
@@ -235,7 +235,7 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       }
 
       // Show interstitial-style ad popup on join
-      openPopup();
+      // openPopup();
 
       // Navigate to guest queue screen
       navigation.replace('GuestQueueScreen', {

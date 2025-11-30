@@ -37,7 +37,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AdProvider, useAd } from './contexts/AdContext';
 import React, { useState } from 'react';
 import AdBanner from './components/Ads/AdBanner';
-import AdPopup from './components/Ads/AdPopup';
+// import AdPopup from './components/Ads/AdPopup';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -335,7 +335,7 @@ function HeaderRight() {
 
 function AppNavigator() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
-  const { showPopup, closePopup } = useAd();
+  // const { showPopup, closePopup } = useAd();
 
   // Only use documentTitle on web
   const documentTitleConfig =
@@ -471,7 +471,7 @@ function AppNavigator() {
             <AdBanner variant="banner" />
           </SafeAreaView>
         )}
-        <AdPopup visible={showPopup} onClose={closePopup} />
+        {/* <AdPopup visible={showPopup} onClose={closePopup} /> */}
       </View>
     </NavigationContainer>
   );
