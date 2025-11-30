@@ -161,14 +161,6 @@ export default function HomeScreen({ navigation, route }: Props) {
                 onPress={() => navigation.navigate('JoinQueueScreen', { id: 'new' })}>
                 <Text style={styles.buttonText}>Join Queue</Text>
               </Pressable>
-
-              {user && (
-                <Pressable
-                  style={[styles.myQueuesButton, styles.myQueuesButtonDesktop]}
-                  onPress={() => navigation.navigate('HostDashboardScreen')}>
-                  <Text style={styles.myQueuesButtonText}>My Queues</Text>
-                </Pressable>
-              )}
             </View>
 
             <View style={styles.footerLinks}>
