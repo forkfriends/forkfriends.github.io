@@ -101,7 +101,7 @@ export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
         bannerSize="smartBannerPortrait"
         adUnitID={resolvedUnitId}
         servePersonalizedAds={false}
-        onDidFailToReceiveAdWithError={(error) => {
+        onDidFailToReceiveAdWithError={(error: any) => {
           // Avoid native alerts; log for debugging
           console.warn('[AdBanner] Failed to load ad', error);
         }}
