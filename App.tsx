@@ -18,6 +18,7 @@ import {
   Text,
   Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, LogOut, User, BarChart3 } from 'lucide-react-native';
 import './global.css';
 
@@ -33,7 +34,10 @@ import LoginScreen from './components/Login/LoginScreen';
 import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AdProvider, useAd } from './contexts/AdContext';
 import React, { useState } from 'react';
+import AdBanner from './components/Ads/AdBanner';
+// import AdPopup from './components/Ads/AdPopup';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -331,6 +335,7 @@ function HeaderRight() {
 
 function AppNavigator() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  // const { showPopup, closePopup } = useAd();
 
   // Only use documentTitle on web
   const documentTitleConfig =
@@ -344,120 +349,130 @@ function AppNavigator() {
   return (
     <NavigationContainer ref={navigationRef} linking={linking} documentTitle={documentTitleConfig}>
       <StatusBar style="auto" />
-      <Stack.Navigator
-        initialRouteName="HomeScreen"
-        screenOptions={({ navigation, route }) => {
-          const isNative = Platform.OS !== 'web';
-          const isHomeScreen = route.name === 'HomeScreen';
+      <View style={{ flex: 1 }}>
+        <Stack.Navigator
+          initialRouteName="HomeScreen"
+          screenOptions={({ navigation, route }) => {
+            const isNative = Platform.OS !== 'web';
+            const isHomeScreen = route.name === 'HomeScreen';
 
-          // For HostQueueScreen, we need custom back behavior to go to HomeScreen
-          const isHostQueueScreen = route.name === 'HostQueueScreen';
+            // For HostQueueScreen, we need custom back behavior to go to HomeScreen
+            const isHostQueueScreen = route.name === 'HostQueueScreen';
 
-          // Base options for all screens
-          const baseOptions = {
-            headerRight: () => <HeaderRight />,
-            headerTitle: '',
-            headerTintColor: '#111',
-            // This sets what the NEXT screen's back button will say
-            headerBackTitle: 'Back',
-          };
+            // Base options for all screens
+            const baseOptions = {
+              headerRight: () => <HeaderRight />,
+              headerTitle: '',
+              headerTintColor: '#111',
+              // This sets what the NEXT screen's back button will say
+              headerBackTitle: 'Back',
+            };
 
-          // Native platforms: use native back button with proper animations
-          if (isNative) {
-            // HomeScreen: no back button
+            // Native platforms: use native back button with proper animations
+            if (isNative) {
+              // HomeScreen: no back button
+              if (isHomeScreen) {
+                return {
+                  ...baseOptions,
+                  headerBackVisible: false,
+                  headerLeft: () => <View style={headerStyles.backButtonSpacer} />,
+                };
+              }
+
+              // All other screens: use native back button
+              return {
+                ...baseOptions,
+                headerBackVisible: true,
+              };
+            }
+
+            // Web: custom back button for all non-home screens
             if (isHomeScreen) {
               return {
                 ...baseOptions,
-                headerBackVisible: false,
                 headerLeft: () => <View style={headerStyles.backButtonSpacer} />,
               };
             }
 
-            // All other screens: use native back button
+            const handleBack = () => {
+              if (isHostQueueScreen) {
+                navigation.navigate('HomeScreen');
+              } else if (navigation.canGoBack()) {
+                navigation.goBack();
+              } else {
+                navigation.navigate('HomeScreen');
+              }
+            };
+
             return {
               ...baseOptions,
-              headerBackVisible: true,
+              headerLeft: () => (
+                <Pressable
+                  style={headerStyles.backButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go back"
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  onPress={handleBack}>
+                  <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
+                </Pressable>
+              ),
             };
-          }
-
-          // Web: custom back button for all non-home screens
-          if (isHomeScreen) {
-            return {
-              ...baseOptions,
-              headerLeft: () => <View style={headerStyles.backButtonSpacer} />,
-            };
-          }
-
-          const handleBack = () => {
-            if (isHostQueueScreen) {
-              navigation.navigate('HomeScreen');
-            } else if (navigation.canGoBack()) {
-              navigation.goBack();
-            } else {
-              navigation.navigate('HomeScreen');
-            }
-          };
-
-          return {
-            ...baseOptions,
-            headerLeft: () => (
-              <Pressable
-                style={headerStyles.backButton}
-                accessibilityRole="button"
-                accessibilityLabel="Go back"
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                onPress={handleBack}>
-                <ArrowLeft size={22} color="#111" strokeWidth={2.5} />
-              </Pressable>
-            ),
-          };
-        }}>
-        <Stack.Screen
-          name="HomeScreen"
-          component={HomeScreen}
-          options={{ headerBackTitle: 'Home' }}
-        />
-        <Stack.Screen
-          name="LoginScreen"
-          component={LoginScreen}
-          options={{ headerBackTitle: 'Back' }}
-        />
-        <Stack.Screen
-          name="MakeQueueScreen"
-          component={MakeQueueScreen}
-          options={{ headerBackTitle: 'Back' }}
-        />
-        <Stack.Screen
-          name="JoinQueueScreen"
-          component={JoinQueueScreen}
-          options={{ headerBackTitle: 'Back' }}
-        />
-        <Stack.Screen
-          name="GuestQueueScreen"
-          component={GuestQueueScreen}
-          options={{ headerBackTitle: 'Back' }}
-        />
-        <Stack.Screen
-          name="HostQueueScreen"
-          component={HostQueueScreen}
-          options={{ headerBackTitle: 'Back' }}
-        />
-        <Stack.Screen
-          name="PrivacyPolicyScreen"
-          component={PrivacyPolicyScreen}
-          options={{ headerBackTitle: 'Back' }}
-        />
-        <Stack.Screen
-          name="AdminDashboardScreen"
-          component={AdminDashboardScreen}
-          options={{ headerBackTitle: 'Back' }}
-        />
-        <Stack.Screen
-          name="HostDashboardScreen"
-          component={HostDashboardScreen}
-          options={{ headerBackTitle: 'Back' }}
-        />
-      </Stack.Navigator>
+          }}>
+          <Stack.Screen
+            name="HomeScreen"
+            component={HomeScreen}
+            options={{ headerBackTitle: 'Home' }}
+          />
+          <Stack.Screen
+            name="LoginScreen"
+            component={LoginScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="MakeQueueScreen"
+            component={MakeQueueScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="JoinQueueScreen"
+            component={JoinQueueScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="GuestQueueScreen"
+            component={GuestQueueScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="HostQueueScreen"
+            component={HostQueueScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="PrivacyPolicyScreen"
+            component={PrivacyPolicyScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="AdminDashboardScreen"
+            component={AdminDashboardScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="HostDashboardScreen"
+            component={HostDashboardScreen}
+            options={{ headerBackTitle: 'Back' }}
+          />
+        </Stack.Navigator>
+        {Platform.OS === 'web' ? (
+          <AdBanner variant="banner" />
+        ) : (
+          <SafeAreaView edges={['bottom']} style={{ backgroundColor: '#fff' }}>
+            <AdBanner variant="banner" />
+          </SafeAreaView>
+        )}
+        {/* <AdPopup visible={showPopup} onClose={closePopup} /> */}
+      </View>
     </NavigationContainer>
   );
 }
@@ -466,7 +481,9 @@ export default function App() {
   return (
     <AuthProvider>
       <ModalProvider>
-        <AppNavigator />
+        <AdProvider>
+          <AppNavigator />
+        </AdProvider>
       </ModalProvider>
     </AuthProvider>
   );

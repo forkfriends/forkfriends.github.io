@@ -28,6 +28,7 @@ import styles from './MakeQueueScreen.Styles';
 import { createQueue } from '../../lib/backend';
 import { trackEvent } from '../../utils/analytics';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAd } from '../../contexts/AdContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MakeQueueScreen'>;
 
@@ -84,9 +85,11 @@ function serializeTime(date: Date): string {
 
 export default function MakeQueueScreen({ navigation }: Props) {
   const { user } = useAuth();
+  // const { openPopup } = useAd();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
   const [eventName, setEventName] = useState('');
+  const [eventNameError, setEventNameError] = useState<string | null>(null);
   const [location, setLocation] = useState('');
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
   const [isSearchingLocations, setIsSearchingLocations] = useState(false);
@@ -434,9 +437,10 @@ export default function MakeQueueScreen({ navigation }: Props) {
     const trimmedLocation = location.trim();
     const trimmedContact = contact.trim();
     if (!trimmedEventName) {
-      Alert.alert('Add event name', 'Please provide a name for this event.');
+      setEventNameError('Event name is required to create a queue.');
       return;
     }
+    setEventNameError(null);
     const normalizedMaxGuests = Math.min(MAX_QUEUE_SIZE, Math.max(MIN_QUEUE_SIZE, maxSize));
     const analyticsProps = {
       screen: ANALYTICS_SCREEN,
@@ -503,6 +507,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
         turnstileRef.current.reset();
       }
 
+      // Show interstitial-style ad popup on creation
+      // openPopup();
+
       navigation.replace('HostQueueScreen', {
         code: created.code,
         sessionId: created.sessionId,
@@ -551,14 +558,22 @@ export default function MakeQueueScreen({ navigation }: Props) {
   const renderFormFields = () => (
     <>
       {/* Event Name */}
-      <Text style={styles.label}>Event Name</Text>
+      <Text style={styles.label}>
+        Event Name<span style={{ color: 'red' }}> *</span>
+      </Text>
       <TextInput
         placeholder="Dinner rush, pop-up, etc."
         value={eventName}
-        onChangeText={setEventName}
-        style={styles.input}
+        onChangeText={(text) => {
+          setEventName(text);
+          if (eventNameError && text.trim()) {
+            setEventNameError(null);
+          }
+        }}
+        style={[styles.input, eventNameError ? styles.inputError : undefined]}
         returnKeyType="next"
       />
+      {eventNameError ? <Text style={styles.inputErrorText}>{eventNameError}</Text> : null}
 
       {/* Location */}
       <Text style={styles.label}>Location</Text>
@@ -632,7 +647,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
       )}
 
       {/* Max Queue Size */}
-      <Text style={styles.label}>Max Queue Size</Text>
+      <Text style={styles.label}>
+        Max Queue Size<span style={{ color: 'red' }}> *</span>
+      </Text>
       <View style={styles.sliderRow}>
         <Text style={styles.sliderHint}>Allow up to</Text>
         <Text style={styles.sliderValue}>{maxSize}</Text>
@@ -651,7 +668,9 @@ export default function MakeQueueScreen({ navigation }: Props) {
       />
 
       {/* Open Hours */}
-      <Text style={styles.label}>Open Hours</Text>
+      <Text style={styles.label}>
+        Open Hours<span style={{ color: 'red' }}> *</span>
+      </Text>
       {Platform.OS === 'web' ? (
         <View style={styles.timeRow}>
           {renderWebTimeInput('open', 'Opens')}

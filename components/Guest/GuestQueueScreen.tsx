@@ -29,6 +29,7 @@ import { trackEvent, trackTrustSurveySubmitted } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import Timer from '../Timer';
 import { useModal } from '../../contexts/ModalContext';
+import AdBanner from '../Ads/AdBanner';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GuestQueueScreen'>;
 
@@ -37,6 +38,7 @@ const POLL_INTERVAL_MS = 10000;
 const ANALYTICS_SCREEN = 'guest_queue';
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
+  const anonymousNames = ['Kangaroo', 'Panda', 'Penguin', 'Dolphin', 'Elephant', 'Giraffe', 'Tiger', 'Zebra', 'Koala', 'Otter', 'Quokka', 'Lemur', 'Meerkat', 'Sloth', 'Armadillo', 'Hedgehog', 'Raccoon', 'Chameleon', 'Flamingo', 'Pelican', 'Ostrich', 'Ewe', 'Ibex', 'Lynx', 'Marmot', 'Narwhal'];
   const { showModal } = useModal();
   const {
     code,
@@ -56,6 +58,20 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
 
   // Effective partyId: use route param if available, otherwise use recovered value
   const partyId = initialPartyId || recoveredPartyId;
+
+  const anonymousDisplayName = useMemo(() => {
+    if (guestName?.trim()) {
+      return null;
+    }
+    const key = partyId || code || 'anon';
+    let hash = 0;
+    for (let i = 0; i < key.length; i += 1) {
+      hash = (hash << 5) - hash + key.charCodeAt(i);
+      hash |= 0; // force 32-bit
+    }
+    const idx = Math.abs(hash) % anonymousNames.length;
+    return `Anonymous ${anonymousNames[idx]}`;
+  }, [anonymousNames, guestName, partyId, code]);
 
   // Recover partyId from storage when missing (e.g., page refresh)
   useEffect(() => {
@@ -911,7 +927,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       <Text style={styles.sectionTitle}>Your Party</Text>
       <View style={styles.detailRow}>
         <Text style={styles.detailLabel}>Name</Text>
-        <Text style={styles.detailValue}>{guestName?.trim() || 'Anonymous'}</Text>
+        <Text style={styles.detailValue}>{guestName?.trim() || anonymousDisplayName}</Text>
       </View>
       <View style={styles.detailRow}>
         <Text style={styles.detailLabel}>Party Size</Text>
@@ -935,6 +951,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             <Text style={styles.leaveButtonText}>Leave Queue</Text>
           )}
         </Pressable>
+        <AdBanner variant='square' />
       </View>
     );
   };

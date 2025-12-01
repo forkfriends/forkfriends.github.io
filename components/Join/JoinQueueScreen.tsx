@@ -31,6 +31,7 @@ import { trackEvent } from '../../utils/analytics';
 import { storage } from '../../utils/storage';
 import { useModal } from '../../contexts/ModalContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAd } from '../../contexts/AdContext';
 import { Bell, BellRing, Smartphone, Users } from 'lucide-react-native';
 import TurnstileNative from '../TurnstileNative';
 
@@ -52,6 +53,7 @@ const ANALYTICS_SCREEN = 'join_queue';
 export default function JoinQueueScreen({ navigation, route }: Props) {
   const { showModal } = useModal();
   const { login } = useAuth();
+  // const { openPopup } = useAd();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
   const routeCode =
@@ -231,6 +233,9 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
       } catch (storageError) {
         console.warn('Failed to store joined queue info', storageError);
       }
+
+      // Show interstitial-style ad popup on join
+      // openPopup();
 
       // Navigate to guest queue screen
       navigation.replace('GuestQueueScreen', {

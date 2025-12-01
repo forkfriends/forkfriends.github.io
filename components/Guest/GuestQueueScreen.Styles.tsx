@@ -370,6 +370,7 @@ export default StyleSheet.create({
   actions: {
     marginTop: 8,
     alignItems: 'center',
+    gap: 12,
   },
   leaveButton: {
     backgroundColor: '#c1121f',
