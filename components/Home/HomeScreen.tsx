@@ -30,6 +30,7 @@ export default function HomeScreen({ navigation, route }: Props) {
   const { showModal } = useModal();
   const { width } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && width >= DESKTOP_BREAKPOINT;
+  const isMobile = Platform.OS == 'android' || Platform.OS == 'ios';
   const handledPrefillRef = useRef(false);
   const initialLoadDoneRef = useRef(false);
   const handledShowModalRef = useRef(false);
@@ -248,8 +249,12 @@ export default function HomeScreen({ navigation, route }: Props) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
         <View style={styles.innerContainer}>
-          <View style={styles.titleContainer}>
-            <Image source={logoSource} style={styles.logoIcon} resizeMode="contain" />
+          <View style={[styles.titleContainer, isMobile && styles.titleContainerMobile]}>
+            <Image
+              source={logoSource}
+              style={[styles.logoIcon, isMobile && styles.logoIconMobile]}
+              resizeMode="contain"
+            />
             <Text style={styles.title}>QueueUp</Text>
           </View>
 
