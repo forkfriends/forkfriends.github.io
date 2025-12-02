@@ -23,13 +23,7 @@ import * as MediaLibrary from 'expo-media-library';
 import QRCode from 'react-native-qrcode-svg';
 import type { RootStackParamList } from '../../types/navigation';
 import styles from './HostQueueScreen.Styles';
-import {
-  advanceQueueHost,
-  closeQueueHost,
-  HostParty,
-  buildHostConnectUrl,
-  buildHostWsUrlFromCode,
-} from '../../lib/backend';
+import { advanceQueueHost, closeQueueHost, HostParty, API_BASE_URL } from '../../lib/backend';
 import { Feather } from '@expo/vector-icons';
 import { Lock, Users } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
@@ -170,9 +164,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
             }
           }
 
-          // Build wsUrl from code if not present in storage (server-synced queues don't have wsUrl)
-          const wsUrl = activeQueue.wsUrl || buildHostWsUrlFromCode(code);
-
           // Build joinUrl from code if not present in storage
           const joinUrl =
             activeQueue.joinUrl ||
@@ -187,7 +178,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
 
           setRecoveredParams({
             sessionId: activeQueue.sessionId,
-            wsUrl,
             joinUrl,
             hostAuthToken,
             eventName: activeQueue.eventName,
@@ -343,13 +333,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   ]);
 
   const snapshotUrl = useMemo(() => {
-    if (!wsUrl) return null;
-    const baseUrl = wsUrl
-      .replace('/connect', '/snapshot')
-      .replace('wss://', 'https://')
-      .replace('ws://', 'http://');
-    return baseUrl;
-  }, [wsUrl]);
+    if (!code) return null;
+    return `${API_BASE_URL}/api/queue/${code.toUpperCase()}/snapshot`;
+  }, [code]);
   // Allow host actions if we have a local token OR if user is authenticated (backend will verify ownership)
   const hasHostAuth = Boolean(hostToken) || isAuthenticated;
   const recoveringHostAuth = !hasHostAuth && Boolean(sessionId);

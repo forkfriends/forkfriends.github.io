@@ -19,7 +19,6 @@ import styles from './GuestQueueScreen.Styles';
 import type { RootStackParamList } from '../../types/navigation';
 import {
   API_BASE_URL,
-  buildGuestConnectUrl,
   getVapidPublicKey,
   leaveQueue,
   savePushSubscription,
@@ -242,11 +241,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
 
   const snapshotUrl = useMemo(() => {
     if (!code || !partyId) return null;
-    const wsUrl = buildGuestConnectUrl(code, partyId);
-    return wsUrl
-      .replace('/connect', '/snapshot')
-      .replace('wss://', 'https://')
-      .replace('ws://', 'http://');
+    return `${API_BASE_URL}/api/queue/${code.toUpperCase()}/snapshot?partyId=${encodeURIComponent(partyId)}`;
   }, [code, partyId]);
 
   const handleSnapshot = useCallback(
