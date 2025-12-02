@@ -194,6 +194,8 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const shouldReconnectRef = useRef(true);
   const autoPushAttemptRef = useRef<string | null>(null);
   const etag = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isPollingRef = useRef(false); // Prevent concurrent polls
 
   const clearReconnect = useCallback(() => {
     if (reconnectTimer.current) {
@@ -375,17 +377,34 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       return;
     }
 
+    // Prevent concurrent polls
+    if (isPollingRef.current) {
+      return;
+    }
+    isPollingRef.current = true;
+
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     try {
       const headers: HeadersInit = {};
       if (etag.current) {
         headers['If-None-Match'] = etag.current;
       }
 
-      const response = await fetch(snapshotUrl, { headers });
+      const response = await fetch(snapshotUrl, {
+        headers,
+        cache: 'no-store', // Bypass Safari's aggressive caching
+        signal: abortControllerRef.current.signal,
+      });
 
       if (response.status === 304) {
         // No changes, connection is healthy
         setConnectionState('open');
+        isPollingRef.current = false;
         return;
       }
 
@@ -402,8 +421,15 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         setConnectionState('closed');
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') {
+        isPollingRef.current = false;
+        return;
+      }
       console.error('[GuestQueueScreen] Poll error:', error);
       setConnectionState('closed');
+    } finally {
+      isPollingRef.current = false;
     }
   }, [snapshotUrl, handleSnapshot]);
 
@@ -425,6 +451,29 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     }, POLL_INTERVAL_MS);
   }, [snapshotUrl, clearReconnect, stopPolling, poll]);
 
+  // Handle visibility changes - pause polling when tab is hidden, resume when visible
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Tab became visible - poll immediately to get fresh data
+        if (snapshotUrl && isActive) {
+          // Clear stale ETag to force fresh data after being backgrounded
+          etag.current = null;
+          poll();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [snapshotUrl, isActive, poll]);
+
   useEffect(() => {
     if (!partyId || !code || !isActive) {
       return undefined;
@@ -437,6 +486,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       shouldReconnectRef.current = false;
       clearReconnect();
       stopPolling();
+      // Cancel any in-flight requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [code, partyId, isActive, clearReconnect, stopPolling, startPolling]);
 
@@ -444,6 +497,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     return () => {
       clearReconnect();
       stopPolling();
+      // Cancel any in-flight requests on unmount
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [clearReconnect, stopPolling]);
 
@@ -656,9 +713,9 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             throw new Error('Invalid VAPID public key format');
           }
         };
-        const isGhPages = window.location.pathname.startsWith('/queueup');
-        const swPath = isGhPages ? '/sw.js' : '/sw.js';
-        const swScope = isGhPages ? '/' : '/';
+        // Service worker is always at root - deployed to forkfriends.github.io (not /queueup subpath)
+        const swPath = '/sw.js';
+        const swScope = '/';
         const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
         let subscription = await registration.pushManager.getSubscription();
         let subscriptionState: 'existing' | 'new' = subscription ? 'existing' : 'new';
