@@ -33,7 +33,7 @@ async function getStoredSessionToken(): Promise<string | null> {
  * Build headers for authenticated API requests
  * Includes Bearer token if available (for cross-origin scenarios)
  */
-async function getAuthHeaders(): Promise<Record<string, string>> {
+export async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
