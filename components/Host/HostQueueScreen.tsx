@@ -269,7 +269,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const etag = useRef<string | null>(null);
   const hasInitializedQueue = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const isPollingRef = useRef(false); // Prevent concurrent polls
 
   // Clear ETag when entering a new queue session to ensure fresh data
   useEffect(() => {
@@ -351,7 +350,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       .replace('ws://', 'http://');
     return baseUrl;
   }, [wsUrl]);
-  const hasHostAuth = Boolean(hostToken);
+  // Allow host actions if we have a local token OR if user is authenticated (backend will verify ownership)
+  const hasHostAuth = Boolean(hostToken) || isAuthenticated;
   const recoveringHostAuth = !hasHostAuth && Boolean(sessionId);
 
   const clearReconnectTimeout = useCallback(() => {
@@ -397,26 +397,21 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, []);
 
   const poll = useCallback(async () => {
-    if (!hasHostAuth || !hostToken || !snapshotUrl) {
+    // Need either hostToken OR isAuthenticated (backend verifies ownership for authenticated users)
+    if (!hasHostAuth || !snapshotUrl) {
       return;
     }
 
-    // Prevent concurrent polls
-    if (isPollingRef.current) {
-      return;
-    }
-    isPollingRef.current = true;
-
-    // Cancel any in-flight request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    abortControllerRef.current = new AbortController();
+    // Create a new AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
-      const headers: HeadersInit = {
-        'x-host-auth': hostToken,
-      };
+      const headers: HeadersInit = {};
+      // Include host token if available (for non-authenticated users or as fallback)
+      if (hostToken) {
+        headers['x-host-auth'] = hostToken;
+      }
       // Only send If-None-Match if we've already initialized the queue state
       // This ensures the first poll always fetches data
       if (etag.current && hasInitializedQueue.current) {
@@ -425,9 +420,15 @@ export default function HostQueueScreen({ route, navigation }: Props) {
 
       const response = await fetch(snapshotUrl, {
         headers,
+        credentials: 'include', // Include auth cookies for authenticated users
         cache: 'no-store', // Bypass Safari's aggressive caching
-        signal: abortControllerRef.current.signal,
+        signal: controller.signal,
       });
+
+      // Check if this request was aborted
+      if (controller.signal.aborted) {
+        return;
+      }
 
       if (response.status === 304) {
         // No changes, connection is healthy
@@ -435,16 +436,23 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         if (hasInitializedQueue.current) {
           setConnectionState('open');
           setConnectionError(null);
-          isPollingRef.current = false;
           return;
         }
         // If we haven't initialized yet, we need to fetch data
         // Retry without If-None-Match header to force a fresh fetch
+        const retryHeaders: HeadersInit = {};
+        if (hostToken) {
+          retryHeaders['x-host-auth'] = hostToken;
+        }
         const retryResponse = await fetch(snapshotUrl, {
-          headers: { 'x-host-auth': hostToken },
+          headers: retryHeaders,
+          credentials: 'include',
           cache: 'no-store',
-          signal: abortControllerRef.current.signal,
+          signal: controller.signal,
         });
+        if (controller.signal.aborted) {
+          return;
+        }
         if (retryResponse.ok) {
           const newEtag = retryResponse.headers.get('ETag');
           if (newEtag) {
@@ -457,7 +465,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           setConnectionError(null);
           setConnectionErrorModalVisible(false);
         }
-        isPollingRef.current = false;
         return;
       }
 
@@ -480,14 +487,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     } catch (error) {
       // Ignore abort errors
       if (error instanceof Error && error.name === 'AbortError') {
-        isPollingRef.current = false;
         return;
       }
       console.error('[HostQueueScreen] Poll error:', error);
       setConnectionError('Unable to connect to the server');
       setConnectionErrorModalVisible(true);
-    } finally {
-      isPollingRef.current = false;
     }
   }, [hasHostAuth, hostToken, snapshotUrl, handleSnapshot]);
 
@@ -649,7 +653,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       try {
         const result = await advanceQueueHost({
           code,
-          hostAuthToken: hostToken as string,
+          hostAuthToken: hostToken, // Optional - backend will verify ownership via session for authenticated users
           servedPartyId: nowServing?.id,
           nextPartyId,
         });
@@ -968,12 +972,12 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, [posterBlackWhite, handleGeneratePoster]);
 
   const performCloseQueue = useCallback(async () => {
-    if (!hasHostAuth || closeLoading || !hostToken) {
+    if (!hasHostAuth || closeLoading) {
       return;
     }
     setCloseLoading(true);
     try {
-      await closeQueueHost({ code, hostAuthToken: hostToken });
+      await closeQueueHost({ code, hostAuthToken: hostToken }); // Optional - backend will verify ownership via session
       setClosed(true);
       setQueue([]);
       setNowServing(null);

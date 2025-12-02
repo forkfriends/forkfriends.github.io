@@ -33,8 +33,8 @@ async function getStoredSessionToken(): Promise<string | null> {
  * Build headers for authenticated API requests
  * Includes Bearer token if available (for cross-origin scenarios)
  */
-async function getAuthHeaders(): Promise<HeadersInit> {
-  const headers: HeadersInit = {
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
     'content-type': 'application/json',
   };
 
@@ -365,7 +365,7 @@ export async function saveExpoPushToken(params: {
 
 export interface AdvanceQueueParams {
   code: string;
-  hostAuthToken: string;
+  hostAuthToken?: string; // Optional if user is authenticated and owns the queue
   servedPartyId?: string;
   nextPartyId?: string;
 }
@@ -394,12 +394,16 @@ export async function advanceQueueHost({
     nextParty: nextPartyId,
   };
 
+  // Include auth headers for authenticated users (enables cross-browser access)
+  const headers = await getAuthHeaders();
+  if (hostAuthToken) {
+    headers['x-host-auth'] = hostAuthToken;
+  }
+
   const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/advance`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-host-auth': hostAuthToken,
-    },
+    credentials: 'include',
+    headers,
     body: JSON.stringify(payload),
   });
 
@@ -412,15 +416,20 @@ export async function advanceQueueHost({
 
 export interface CloseQueueParams {
   code: string;
-  hostAuthToken: string;
+  hostAuthToken?: string; // Optional if user is authenticated and owns the queue
 }
 
 export async function closeQueueHost({ code, hostAuthToken }: CloseQueueParams): Promise<void> {
+  // Include auth headers for authenticated users (enables cross-browser access)
+  const headers = await getAuthHeaders();
+  if (hostAuthToken) {
+    headers['x-host-auth'] = hostAuthToken;
+  }
+
   const response = await fetch(`${API_BASE_URL}/api/queue/${code.toUpperCase()}/close`, {
     method: 'POST',
-    headers: {
-      'x-host-auth': hostAuthToken,
-    },
+    credentials: 'include',
+    headers,
   });
 
   if (!response.ok) {

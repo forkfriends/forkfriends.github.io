@@ -2793,6 +2793,24 @@ async function handleSnapshot(request: Request, env: Env, code: string): Promise
   const headers = new Headers(request.headers);
   headers.set('x-session-id', sessionId);
 
+  // Check if authenticated user owns this queue and add host token if so
+  // This enables cross-browser/cross-device access for logged-in users
+  const authSessionId = getSessionFromRequest(request);
+  if (authSessionId && !headers.has('x-host-auth')) {
+    const user = await validateSession(env.DB, authSessionId);
+    if (user) {
+      const queue = await env.DB.prepare('SELECT owner_id FROM sessions WHERE id = ?1')
+        .bind(sessionId)
+        .first<{ owner_id: string | null }>();
+
+      if (queue?.owner_id === user.id) {
+        // User owns this queue - generate a valid host token for the DO
+        const hostToken = await generateHostCookieValue(sessionId, env.HOST_AUTH_SECRET);
+        headers.set('x-host-auth', hostToken);
+      }
+    }
+  }
+
   const doUrl = new URL(request.url);
   doUrl.pathname = '/snapshot';
 
@@ -3184,6 +3202,26 @@ async function requireHostAuth(
   sessionId: string,
   env: Env
 ): Promise<string | Response> {
+  // First, check if the user is authenticated and owns this queue
+  // This enables cross-browser/cross-device access for logged-in users
+  const authSessionId = getSessionFromRequest(request);
+  if (authSessionId) {
+    const user = await validateSession(env.DB, authSessionId);
+    if (user) {
+      // Check if this user owns the queue
+      const queue = await env.DB.prepare('SELECT owner_id FROM sessions WHERE id = ?1')
+        .bind(sessionId)
+        .first<{ owner_id: string | null }>();
+
+      if (queue?.owner_id === user.id) {
+        // User owns this queue - generate a valid host token for downstream use
+        const hostToken = await generateHostCookieValue(sessionId, env.HOST_AUTH_SECRET);
+        return hostToken;
+      }
+    }
+  }
+
+  // Fall back to traditional host auth token validation
   const headerToken = request.headers.get('x-host-auth');
   if (headerToken) {
     const headerValid = await verifyHostCookie(headerToken, sessionId, env.HOST_AUTH_SECRET);

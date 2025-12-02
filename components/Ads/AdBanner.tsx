@@ -6,25 +6,29 @@ type Props = {
   variant?: 'banner' | 'square' | 'vertical';
 };
 
-const TEST_ADSENSE_CLIENT = 'ca-pub-3940256099942544'; // Google test AdSense client (web)
-const TEST_ADSENSE_SLOT = '2003685630'; // Google test AdSense slot (web)
-
 export default function AdBanner({ variant = 'banner' }: Props) {
   return <WebAdSenseBanner variant={variant} />;
 }
 
 function WebAdSenseBanner({ variant }: { variant: 'banner' | 'square' | 'vertical' }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [ready, setReady] = useState(false);
-  const [fallback, setFallback] = useState(false);
-  const clientId = process.env.EXPO_PUBLIC_ADSENSE_CLIENT_ID || TEST_ADSENSE_CLIENT;
-  const slotId = process.env.EXPO_PUBLIC_ADSENSE_SLOT_ID || TEST_ADSENSE_SLOT;
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const clientId = process.env.EXPO_PUBLIC_ADSENSE_CLIENT_ID;
+  const slotId = process.env.EXPO_PUBLIC_ADSENSE_SLOT_ID;
   const forcePlaceholder = process.env.EXPO_PUBLIC_AD_PLACEHOLDER === '1';
 
-  if (forcePlaceholder) {
+  // Show dev placeholder if no AdSense credentials configured or explicitly disabled
+  if (!clientId || !slotId || forcePlaceholder) {
     return (
       <View style={{ alignItems: 'center' }}>
-        <PlaceholderCard />
+        <DevPlaceholder
+          variant={variant}
+          reason={
+            forcePlaceholder
+              ? 'Ads disabled via EXPO_PUBLIC_AD_PLACEHOLDER'
+              : 'Set EXPO_PUBLIC_ADSENSE_CLIENT_ID and EXPO_PUBLIC_ADSENSE_SLOT_ID'
+          }
+        />
       </View>
     );
   }
@@ -32,7 +36,11 @@ function WebAdSenseBanner({ variant }: { variant: 'banner' | 'square' | 'vertica
   useEffect(() => {
     if (typeof document === 'undefined') return;
     let cancelled = false;
-    const fallbackTimer = setTimeout(() => setFallback(true), 4000);
+    const fallbackTimer = setTimeout(() => {
+      if (status === 'loading') {
+        setStatus('error');
+      }
+    }, 8000);
 
     const ensureScript = () =>
       new Promise<void>((resolve, reject) => {
@@ -73,80 +81,86 @@ function WebAdSenseBanner({ variant }: { variant: 'banner' | 'square' | 'vertica
         ins.style.height = dims.height;
         ins.setAttribute('data-ad-client', clientId);
         ins.setAttribute('data-ad-slot', slotId);
-        ins.setAttribute('data-adtest', 'on'); // keep test creatives on web
         ins.setAttribute('data-ad-format', 'auto');
         ins.setAttribute('data-full-width-responsive', 'true');
         containerRef.current.appendChild(ins);
         try {
           // @ts-expect-error adsbygoogle injected by script
           (window.adsbygoogle = window.adsbygoogle || []).push({});
-          setReady(true);
+          setStatus('ready');
         } catch (err) {
           console.warn('[AdBanner][web] Failed to render ad', err);
+          setStatus('error');
         }
       })
       .catch((err) => {
         if (!cancelled) {
           console.warn('[AdBanner][web] Failed to load AdSense script', err);
+          setStatus('error');
         }
       });
 
     return () => {
       cancelled = true;
       clearTimeout(fallbackTimer);
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
-      }
     };
-  }, [clientId, slotId]);
+  }, [clientId, slotId, variant]);
+
+  const dims = getDims(variant);
 
   return (
     <View style={{ alignItems: 'center' }}>
       <View
         style={{
-          width: getDims(variant).containerWidth as any,
-          maxWidth: getDims(variant).maxWidth as any,
-          minHeight: getDims(variant).minHeight,
-          backgroundColor: '#f8fafc',
-          borderWidth: 1,
+          width: dims.containerWidth as any,
+          maxWidth: dims.maxWidth as any,
+          minHeight: dims.minHeight,
+          backgroundColor: status === 'ready' ? 'transparent' : '#f8fafc',
+          borderWidth: status === 'ready' ? 0 : 1,
           borderColor: '#e5e7eb',
           alignItems: 'center',
           justifyContent: 'center',
           overflow: 'hidden',
         }}>
-        {!ready ? (
-          fallback ? (
-            <PlaceholderCard />
-          ) : (
-            <Text style={{ fontSize: 12, color: '#6b7280', padding: 8 }}>Loading ad…</Text>
-          )
-        ) : null}
+        {status === 'loading' && (
+          <Text style={{ fontSize: 12, color: '#6b7280', padding: 8 }}>Loading ad…</Text>
+        )}
+        {status === 'error' && <DevPlaceholder variant={variant} reason="Ad failed to load" />}
         <div
           ref={containerRef}
-          style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center' }}
+          style={{
+            width: '100%',
+            minHeight: status === 'ready' ? dims.minHeight : 0,
+            display: status === 'ready' ? 'flex' : 'none',
+            justifyContent: 'center',
+          }}
         />
       </View>
     </View>
   );
 }
 
-function PlaceholderCard() {
+function DevPlaceholder({ variant, reason }: { variant: string; reason: string }) {
+  const dims = getDims(variant as 'banner' | 'square' | 'vertical');
   return (
     <View
       style={{
-        height: 50,
+        height: dims.minHeight,
         width: 320,
         maxWidth: '100%',
         paddingHorizontal: 12,
         paddingVertical: 10,
-        backgroundColor: '#eef2ff',
-        borderColor: '#c7d2fe',
+        backgroundColor: '#fef3c7',
+        borderColor: '#f59e0b',
         borderWidth: 1,
         borderRadius: 4,
         alignItems: 'center',
         justifyContent: 'center',
       }}>
-      <Text style={{ fontSize: 12, color: '#4b5563' }}>Ad placeholder</Text>
+      <Text style={{ fontSize: 12, fontWeight: '600', color: '#92400e', marginBottom: 4 }}>
+        Ad Placeholder (Web)
+      </Text>
+      <Text style={{ fontSize: 10, color: '#a16207', textAlign: 'center' }}>{reason}</Text>
     </View>
   );
 }

@@ -12,6 +12,8 @@ const ACTIVE_QUEUES_KEY = 'queueup-active-queues';
 const JOINED_QUEUES_KEY = 'queueup-joined-queues';
 const HOST_AUTH_PREFIX = 'queueup-host-auth:';
 const HOST_AUTH_CODE_PREFIX = 'queueup-host-auth-code:';
+const HOST_AUTH_USER_PREFIX = 'queueup-host-auth-user:'; // User-scoped: {userId}:{sessionId}
+const HOST_AUTH_USER_CODE_PREFIX = 'queueup-host-auth-user-code:'; // User-scoped by code: {userId}:{code}
 const TRUST_SURVEY_PREFIX = 'queueup-trust-survey:';
 const QUEUES_LAST_SYNC_KEY = 'queueup-queues-last-sync';
 const MEMBERSHIPS_LAST_SYNC_KEY = 'queueup-memberships-last-sync';
@@ -83,7 +85,7 @@ export type StoredQueue = {
   contactInfo?: string | null;
   openTime?: string | null;
   closeTime?: string | null;
-   requiresAuth?: boolean;
+  requiresAuth?: boolean;
   createdAt: number; // timestamp for sorting
 };
 
