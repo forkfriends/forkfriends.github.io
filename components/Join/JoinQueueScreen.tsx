@@ -393,7 +393,22 @@ export default function JoinQueueScreen({ navigation, route }: Props) {
     }
 
     setScannerActive(false);
-    const normalized = scanned.toUpperCase().slice(-6);
+
+    // Extract queue code from scanned data
+    // QR codes may contain full URLs like: https://example.com/queue/ABCDEF?src=qr
+    // or just the raw code: ABCDEF
+    let normalized = '';
+    try {
+      const url = new URL(scanned);
+      // Extract code from URL path (last segment before query params)
+      const pathSegments = url.pathname.split('/').filter(Boolean);
+      const lastSegment = pathSegments[pathSegments.length - 1] ?? '';
+      normalized = lastSegment.toUpperCase().slice(-6);
+    } catch {
+      // Not a valid URL, treat as raw code
+      normalized = scanned.toUpperCase().slice(-6);
+    }
+
     if (normalized) {
       void trackEvent('qr_scanned', {
         queueCode: normalized,

@@ -222,14 +222,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   );
 
   const [hostToken, setHostToken] = useState<string | undefined>(() => {
-    console.log('[HostQueueScreen] hostToken initializer:', {
-      initialHostAuthToken: !!initialHostAuthToken,
-      storageKey,
-      storageCodeKey,
-      code,
-    });
     if (initialHostAuthToken) {
-      console.log('[HostQueueScreen] Using initialHostAuthToken from route params');
       return initialHostAuthToken;
     }
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -237,16 +230,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       const fromLocal = storageKey ? window.localStorage.getItem(storageKey) : null;
       const fromLocalCode = storageCodeKey ? window.localStorage.getItem(storageCodeKey) : null;
       const fromSession = storageKey ? window.sessionStorage.getItem(storageKey) : null;
-      console.log('[HostQueueScreen] Storage lookup:', {
-        fromLocal: !!fromLocal,
-        fromLocalCode: !!fromLocalCode,
-        fromSession: !!fromSession,
-      });
       if (fromLocal) return fromLocal;
       if (fromLocalCode) return fromLocalCode;
       if (fromSession) return fromSession;
     }
-    console.log('[HostQueueScreen] No hostToken found in initializer');
     return undefined;
   });
 
@@ -288,21 +275,12 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   // If we were navigated here without a host token (e.g., after logout/login),
   // try to recover it from persistent storage using the sessionId.
   useEffect(() => {
-    console.log('[HostQueueScreen] hostToken recovery effect:', {
-      hostToken: !!hostToken,
-      sessionId,
-      code,
-    });
     if (hostToken || !sessionId) return;
 
     (async () => {
       try {
         const stored = await storage.getHostAuth(sessionId);
         const storedByCode = stored ? null : await storage.getHostAuthByCode(code);
-        console.log('[HostQueueScreen] Recovery lookup:', {
-          stored: !!stored,
-          storedByCode: !!storedByCode,
-        });
         if (stored) {
           setHostToken(stored);
           if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -383,21 +361,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, []);
 
   const handleSnapshot = useCallback((snapshot: HostMessage) => {
-    console.log('[HostQueueScreen] handleSnapshot received:', {
-      type: snapshot.type,
-      hasQueue: 'queue' in snapshot,
-      queueLength: Array.isArray((snapshot as any).queue) ? (snapshot as any).queue.length : 0,
-      hasNowServing: 'nowServing' in snapshot,
-      nowServing: (snapshot as any).nowServing,
-    });
     try {
       if (snapshot.type === 'queue_update') {
         const queueEntries = Array.isArray(snapshot.queue) ? (snapshot.queue as HostParty[]) : [];
         const serving = (snapshot.nowServing ?? null) as HostParty | null;
-        console.log('[HostQueueScreen] handleSnapshot updating state:', {
-          queueLength: queueEntries.length,
-          serving: serving?.name ?? null,
-        });
         setQueue(queueEntries);
         setNowServing(serving);
         if (typeof snapshot.maxGuests === 'number') {
@@ -416,21 +383,14 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setCallDeadline(null);
         setClosed(true);
       }
-    } catch (err) {
-      console.error('[HostQueueScreen] handleSnapshot error:', err);
+    } catch {
+      // ignore malformed payloads
     }
   }, []);
 
   const poll = useCallback(async () => {
-    console.log('[HostQueueScreen] poll called:', {
-      hasHostAuth,
-      hostToken: !!hostToken,
-      isAuthenticated,
-      snapshotUrl,
-    });
     // Need either hostToken OR isAuthenticated (backend verifies ownership for authenticated users)
     if (!hasHostAuth || !snapshotUrl) {
-      console.log('[HostQueueScreen] poll skipped - missing auth or snapshotUrl');
       return;
     }
 
@@ -520,7 +480,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setConnectionError(null);
         setConnectionErrorModalVisible(false);
       } else {
-        console.warn('[HostQueueScreen] Poll failed:', response.status);
         setConnectionError(`Poll failed: ${response.status}`);
         setConnectionErrorModalVisible(true);
       }
@@ -529,16 +488,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       if (error instanceof Error && error.name === 'AbortError') {
         return;
       }
-      console.error('[HostQueueScreen] Poll error:', error);
       setConnectionError('Unable to connect to the server');
       setConnectionErrorModalVisible(true);
     }
   }, [hasHostAuth, hostToken, snapshotUrl, handleSnapshot]);
 
   const startPolling = useCallback(() => {
-    console.log('[HostQueueScreen] startPolling called:', { hasHostAuth, hostToken: !!hostToken });
     if (!hasHostAuth) {
-      console.log('[HostQueueScreen] startPolling - no host auth, showing error');
       setConnectionState('closed');
       setConnectionError(
         'Missing host authentication. Reopen the host controls on the device that created this queue.'
@@ -553,7 +509,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     setConnectionError(null);
 
     // Poll immediately
-    console.log('[HostQueueScreen] startPolling - calling poll()');
     poll();
 
     // Then poll every POLL_INTERVAL_MS
@@ -587,21 +542,12 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   }, [hasHostAuth, snapshotUrl, isRecoveringParams, recoveringHostAuth, poll]);
 
   useEffect(() => {
-    console.log('[HostQueueScreen] main polling useEffect:', {
-      isRecoveringParams,
-      recoveringHostAuth,
-      isAuthenticated,
-      hasHostAuth,
-      hostToken: !!hostToken,
-    });
     // Don't start polling while still recovering params from storage or host auth
     if (isRecoveringParams || recoveringHostAuth) {
-      console.log('[HostQueueScreen] Still recovering, waiting...');
       return;
     }
 
     if (!hasHostAuth) {
-      console.log('[HostQueueScreen] No host auth available');
       setConnectionState('closed');
       setConnectionError(
         'Missing host authentication. Reopen the host controls on the device that created this queue.'

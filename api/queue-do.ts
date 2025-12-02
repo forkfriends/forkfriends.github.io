@@ -221,11 +221,6 @@ export class QueueDO implements DurableObject {
     };
 
     this.queue.push(party);
-    console.log(`[QueueDO ${this.sessionId}] handleJoin: party added`, {
-      partyId: party.id,
-      name: party.name,
-      queueLength: this.queue.length,
-    });
 
     // Validate userId if provided (should be a string or null)
     const validUserId = typeof userId === 'string' && userId.length > 0 ? userId : null;
@@ -918,11 +913,6 @@ export class QueueDO implements DurableObject {
       closed: this.closed,
     };
     const key = `queue:${this.sessionId}:snapshot`;
-    console.log(`[QueueDO ${this.sessionId}] writeSnapshotToKV:`, {
-      key,
-      queueLength: snapshot.queue.length,
-      nowServing: snapshot.nowServing?.name ?? null,
-    });
     await this.env.QUEUE_KV.put(key, JSON.stringify(snapshot), { expirationTtl: 60 });
   }
 
