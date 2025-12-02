@@ -1233,6 +1233,67 @@ export default {
       }
     }
 
+    // Push API: subscribe with Expo token (native apps)
+    if (request.method === 'POST' && url.pathname === '/api/push/expo-subscribe') {
+      try {
+        const { sessionId, partyId, expoToken } = (await readJson(request)) ?? {};
+        if (!sessionId || !partyId || !expoToken) {
+          return applyCors(jsonError('Invalid Expo subscription payload', 400), corsOrigin);
+        }
+
+        // Validate expo token format: ExponentPushToken[...] or ExpoPushToken[...]
+        if (
+          !expoToken.startsWith('ExponentPushToken[') &&
+          !expoToken.startsWith('ExpoPushToken[')
+        ) {
+          return applyCors(jsonError('Invalid Expo push token format', 400), corsOrigin);
+        }
+
+        // Insert or update expo token subscription
+        // Using expo_token as unique key (endpoint, p256dh, auth are null for native)
+        await env.DB.prepare(
+          `INSERT INTO push_subscriptions (session_id, party_id, endpoint, p256dh, auth, expo_token)
+             VALUES (?1, ?2, '', '', '', ?3)
+             ON CONFLICT(endpoint) DO UPDATE SET
+               session_id=excluded.session_id,
+               party_id=excluded.party_id,
+               expo_token=excluded.expo_token,
+               created_at=strftime('%s','now')
+             WHERE endpoint = ''`
+        )
+          .bind(sessionId, partyId, expoToken)
+          .run();
+
+        // Also try to update if there's an existing entry with different endpoint
+        // This handles the case where the same session/party combo exists
+        await env.DB.prepare(
+          `UPDATE push_subscriptions 
+           SET expo_token = ?3, created_at = strftime('%s','now')
+           WHERE session_id = ?1 AND party_id = ?2 AND (expo_token IS NULL OR expo_token != ?3)`
+        )
+          .bind(sessionId, partyId, expoToken)
+          .run();
+
+        // Send confirmation push notification
+        ctx.waitUntil(
+          sendExpoPushNotification({
+            expoToken,
+            title: 'Notifications enabled',
+            body: 'We will alert you as you get closer to the front.',
+            sessionId,
+            partyId,
+            db: env.DB,
+            kind: 'join_confirm',
+          }).catch((err) => console.warn('expo join push error', err))
+        );
+
+        return applyCors(new Response('ok'), corsOrigin);
+      } catch (e) {
+        console.error('expo subscribe error', e);
+        return applyCors(new Response('fail', { status: 500 }), corsOrigin);
+      }
+    }
+
     // Analytics dashboard data
     if (request.method === 'GET' && url.pathname === '/api/analytics') {
       // Require admin authentication
@@ -2214,26 +2275,50 @@ async function sendPushToParty(
     kind?: string;
   }
 ): Promise<boolean> {
+  // Fetch all subscriptions for this party (both web and expo)
   const sub = await env.DB.prepare(
-    'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE session_id=?1 AND party_id=?2 ORDER BY created_at DESC LIMIT 1'
+    'SELECT endpoint, p256dh, auth, expo_token FROM push_subscriptions WHERE session_id=?1 AND party_id=?2 ORDER BY created_at DESC LIMIT 1'
   )
     .bind(sessionId, partyId)
-    .first<{ endpoint: string; p256dh: string; auth: string }>();
+    .first<{ endpoint: string; p256dh: string; auth: string; expo_token: string | null }>();
 
   if (!sub) {
     console.log(`[sendPushToParty] No subscription found for party ${partyId}`);
     return false;
   }
 
-  return sendPushNotification(env, {
-    sessionId,
-    partyId,
-    subscription: { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
-    title: params.title,
-    body: params.body,
-    url: buildAppUrl(env),
-    kind: params.kind,
-  });
+  let webSent = false;
+  let expoSent = false;
+
+  // Send web push if we have a valid endpoint
+  if (sub.endpoint && sub.endpoint.length > 0 && sub.p256dh && sub.auth) {
+    webSent = await sendPushNotification(env, {
+      sessionId,
+      partyId,
+      subscription: { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+      title: params.title,
+      body: params.body,
+      url: buildAppUrl(env),
+      kind: params.kind,
+    });
+  }
+
+  // Send Expo push if we have a token
+  if (sub.expo_token) {
+    expoSent = await sendExpoPushNotification({
+      expoToken: sub.expo_token,
+      title: params.title,
+      body: params.body,
+      sessionId,
+      partyId,
+      db: env.DB,
+      kind: params.kind,
+      // Skip dedupe for expo if we already deduped in web push
+      dedupe: !webSent,
+    });
+  }
+
+  return webSent || expoSent;
 }
 
 async function sendPushNotification(
@@ -2323,6 +2408,110 @@ async function sendPushNotification(
         .catch(() => {});
     }
     console.warn('sendPushNotification error', error);
+    return false;
+  }
+}
+
+/**
+ * Send push notification via Expo Push API
+ * https://docs.expo.dev/push-notifications/sending-notifications/
+ */
+async function sendExpoPushNotification(params: {
+  expoToken: string;
+  title: string;
+  body: string;
+  sessionId?: string;
+  partyId?: string;
+  db?: D1Database;
+  kind?: string;
+  dedupe?: boolean;
+  data?: Record<string, unknown>;
+}): Promise<boolean> {
+  // Dedupe check
+  if (params.kind && params.dedupe !== false && params.db && params.sessionId && params.partyId) {
+    const exists = await params.db
+      .prepare(
+        "SELECT 1 AS x FROM events WHERE session_id=?1 AND party_id=?2 AND type='push_sent' AND json_extract(details, '$.kind') = ?3 LIMIT 1"
+      )
+      .bind(params.sessionId, params.partyId, params.kind)
+      .first<{ x: number }>();
+    if (exists?.x) {
+      return true;
+    }
+  }
+
+  try {
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        to: params.expoToken,
+        title: params.title,
+        body: params.body,
+        sound: 'default',
+        data: params.data ?? {},
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn('Expo push failed:', response.status, errorText);
+
+      // Check if token is invalid and clean up
+      if (response.status === 400 && params.db) {
+        await params.db
+          .prepare('UPDATE push_subscriptions SET expo_token = NULL WHERE expo_token = ?1')
+          .bind(params.expoToken)
+          .run()
+          .catch(() => {});
+      }
+      return false;
+    }
+
+    const result = (await response.json()) as {
+      data?: { status: string; message?: string; details?: { error?: string } };
+    };
+
+    // Check for push ticket errors
+    if (result.data?.status === 'error') {
+      console.warn('Expo push error:', result.data.message, result.data.details);
+
+      // Clean up invalid tokens
+      if (
+        result.data.details?.error === 'DeviceNotRegistered' ||
+        result.data.details?.error === 'InvalidCredentials'
+      ) {
+        if (params.db) {
+          await params.db
+            .prepare('UPDATE push_subscriptions SET expo_token = NULL WHERE expo_token = ?1')
+            .bind(params.expoToken)
+            .run()
+            .catch(() => {});
+        }
+      }
+      return false;
+    }
+
+    // Log successful push
+    if (params.kind && params.db && params.sessionId && params.partyId) {
+      await params.db
+        .prepare(
+          "INSERT INTO events (session_id, party_id, type, details) VALUES (?1, ?2, 'push_sent', ?3)"
+        )
+        .bind(
+          params.sessionId,
+          params.partyId,
+          JSON.stringify({ kind: params.kind, platform: 'expo' })
+        )
+        .run();
+    }
+
+    return true;
+  } catch (error) {
+    console.warn('sendExpoPushNotification error', error);
     return false;
   }
 }

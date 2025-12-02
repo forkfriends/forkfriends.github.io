@@ -24,10 +24,11 @@
     },
     "plugins": [
       [
-        "expo-ads-admob",
+        "expo-notifications",
         {
-          "androidAppId": "ca-app-pub-3659178074995037~5469095890",
-          "iosAppId": "ca-app-pub-3659178074995037~7327320083"
+          "icon": "./assets/logo-icon.png",
+          "color": "#222222",
+          "sounds": []
         }
       ]
     ],
@@ -43,7 +44,16 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.queueup.app",
-      "associatedDomains": ["applinks:queueup-api.danielnwachukwu.workers.dev"]
+      "associatedDomains": ["applinks:queueup-api.danielnwachukwu.workers.dev"],
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"],
+        "NSUserTrackingUsageDescription": "This identifier will be used to deliver personalized ads to you.",
+        "SKAdNetworkItems": [
+          {
+            "SKAdNetworkIdentifier": "cstr6suwn9.skadnetwork"
+          }
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -64,7 +74,18 @@
           ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
-      ]
-    }
+      ],
+      "googleServicesFile": "./google-services.json"
+    },
+    "notification": {
+      "icon": "./assets/logo-icon.png",
+      "color": "#222222"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a570553d-0ebf-4de7-9895-b8f0e312805e"
+      }
+    },
+    "owner": "queueup"
   }
 }

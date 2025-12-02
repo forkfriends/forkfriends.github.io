@@ -21,8 +21,10 @@
         form-action 'self';
         object-src 'none'
       " />
-      <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js" crossorigin="anonymous"></script>
-
+    <script
+      async
+      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
+      crossorigin="anonymous"></script>
 
     <!-- PWA Meta Tags -->
     <meta name="application-name" content="QueueUp" />
@@ -88,6 +90,27 @@
     </script>
 
     <title>QueueUp</title>
+
+    <!-- Single Page Apps for GitHub Pages redirect handler -->
+    <!-- This script checks for a redirect from 404.html and restores the original path -->
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var redirectPath = params.get('p');
+        if (redirectPath) {
+          // Remove the ?p= parameter and restore the original path
+          params.delete('p');
+          var remainingParams = params.toString();
+          var newUrl =
+            window.location.origin +
+            window.location.pathname.replace(/\/$/, '') + // Remove trailing slash from base
+            redirectPath +
+            (remainingParams ? '?' + remainingParams : '') +
+            window.location.hash;
+          window.history.replaceState(null, '', newUrl);
+        }
+      })();
+    </script>
 
     <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
     <style id="expo-reset">
