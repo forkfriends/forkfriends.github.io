@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, View, Text } from 'react-native';
-import Constants from 'expo-constants';
+import { View, Text } from 'react-native';
 
 type Props = {
   adUnitId?: string;
@@ -10,120 +9,8 @@ type Props = {
 const TEST_ADSENSE_CLIENT = 'ca-pub-3940256099942544'; // Google test AdSense client (web)
 const TEST_ADSENSE_SLOT = '2003685630'; // Google test AdSense slot (web)
 
-// Dynamic import types for react-native-google-mobile-ads
-type BannerAdModule = {
-  BannerAd: React.ComponentType<any>;
-  BannerAdSize: {
-    BANNER: string;
-    LARGE_BANNER: string;
-    MEDIUM_RECTANGLE: string;
-    FULL_BANNER: string;
-    LEADERBOARD: string;
-    ANCHORED_ADAPTIVE_BANNER: string;
-  };
-  TestIds: {
-    BANNER: string;
-  };
-};
-
-export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
-  const isExpoGo = Constants.appOwnership === 'expo';
-  const [adModule, setAdModule] = useState<BannerAdModule | null>(null);
-  const [adReady, setAdReady] = useState<boolean | null>(
-    Platform.OS === 'web' || isExpoGo ? false : null
-  );
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    if (isExpoGo) return; // AdMob native modules aren't bundled in Expo Go
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const mod = await import('react-native-google-mobile-ads');
-        if (cancelled) return;
-
-        setAdModule(mod as BannerAdModule);
-        setAdReady(true);
-      } catch (err) {
-        console.warn('[AdBanner] react-native-google-mobile-ads unavailable', err);
-        if (!cancelled) {
-          setAdReady(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (Platform.OS === 'web') {
-    return <WebAdSenseBanner variant={variant} />;
-  }
-
-  // Expo Go cannot host the native AdMob module; show a soft placeholder instead.
-  if (isExpoGo) {
-    return (
-      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-        <PlaceholderCard />
-        <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
-          Ads need a dev/production build
-        </Text>
-      </View>
-    );
-  }
-
-  if (adReady === null) {
-    // Still probing availability; keep layout stable
-    return (
-      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-        <Text style={{ fontSize: 12, color: '#6b7280', padding: 8 }}>Loading ad…</Text>
-      </View>
-    );
-  }
-
-  if (adReady === false || !adModule) {
-    return (
-      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-        <PlaceholderCard />
-      </View>
-    );
-  }
-
-  const { BannerAd, BannerAdSize, TestIds } = adModule;
-  const resolvedUnitId = adUnitId || process.env.EXPO_PUBLIC_ADMOB_BANNER_ID || TestIds.BANNER;
-
-  // Map variant to BannerAdSize
-  const getBannerSize = () => {
-    switch (variant) {
-      case 'square':
-        return BannerAdSize.MEDIUM_RECTANGLE; // 300x250
-      case 'vertical':
-        return BannerAdSize.LARGE_BANNER; // 320x100
-      default:
-        return BannerAdSize.ANCHORED_ADAPTIVE_BANNER;
-    }
-  };
-
-  return (
-    <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-      <BannerAd
-        unitId={resolvedUnitId}
-        size={getBannerSize()}
-        requestOptions={{
-          requestNonPersonalizedAdsOnly: true,
-        }}
-        onAdLoaded={() => {
-          console.log('[AdBanner] Ad loaded');
-        }}
-        onAdFailedToLoad={(error: any) => {
-          console.warn('[AdBanner] Failed to load ad', error);
-        }}
-      />
-    </View>
-  );
+export default function AdBanner({ variant = 'banner' }: Props) {
+  return <WebAdSenseBanner variant={variant} />;
 }
 
 function WebAdSenseBanner({ variant }: { variant: 'banner' | 'square' | 'vertical' }) {
