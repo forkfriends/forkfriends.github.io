@@ -36,6 +36,7 @@ import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AdProvider, useAd } from './contexts/AdContext';
+import { DialogProvider } from './contexts/DialogContext';
 import React, { useState, useEffect, useRef } from 'react';
 import AdBanner from './components/Ads/AdBanner';
 // import AdPopup from './components/Ads/AdPopup';
@@ -524,7 +525,9 @@ export default function App() {
     <AuthProvider>
       <ModalProvider>
         <AdProvider>
-          <AppNavigator />
+          <DialogProvider>
+            <AppNavigator />
+          </DialogProvider>
         </AdProvider>
       </ModalProvider>
     </AuthProvider>

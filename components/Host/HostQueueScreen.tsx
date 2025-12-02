@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Modal,
   Platform,
@@ -12,7 +11,6 @@ import {
   ToastAndroid,
   View,
   useWindowDimensions,
-  type GestureResponderEvent,
 } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -34,6 +32,7 @@ import { Feather } from '@expo/vector-icons';
 import { Lock, Users } from 'lucide-react-native';
 import { storage } from '../../utils/storage';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../contexts/DialogContext';
 import Timer from '../Timer';
 import { trackEvent } from '../../utils/analytics';
 import { generatePosterImage } from './posterGenerator';
@@ -81,7 +80,10 @@ type HostMessage =
       nowServing?: HostParty | null;
       maxGuests?: number;
       callDeadline?: number | null;
+      closed?: boolean;
+      eventName?: string;
     }
+  | { type: 'closed' }
   | Record<string, unknown>;
 
 type ConnectionState = 'connecting' | 'open' | 'closed';
@@ -92,6 +94,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
   const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const { alert, confirm } = useDialog();
 
   const {
     code,
@@ -246,7 +249,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const [closed, setClosed] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
-  const [closeConfirmVisibleWeb, setCloseConfirmVisibleWeb] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const isWeb = Platform.OS === 'web';
   const [posterModeLoading, setPosterModeLoading] = useState<'color' | 'bw' | null>(null);
@@ -373,7 +375,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         const deadlineValue =
           typeof snapshot.callDeadline === 'number' ? snapshot.callDeadline : null;
         setCallDeadline(serving ? deadlineValue : null);
-        if (queueEntries.length > 0 || serving) {
+        // Check the closed field from the snapshot - this syncs across devices
+        if (snapshot.closed === true) {
+          setClosed(true);
+        } else if (queueEntries.length > 0 || serving) {
           setClosed(false);
         }
         setConnectionError(null);
@@ -661,7 +666,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         await poll();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to advance queue';
-        Alert.alert('Unable to advance', message);
+        alert({ title: 'Unable to advance', message });
       } finally {
         setActionLoading(false);
       }
@@ -709,13 +714,13 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       if (Platform.OS === 'android') {
         ToastAndroid.show('Queue code copied', ToastAndroid.SHORT);
       } else {
-        Alert.alert('Copied', 'Queue code copied to clipboard.');
+        alert({ title: 'Copied', message: 'Queue code copied to clipboard.' });
       }
     } catch (error) {
       console.warn('Failed to copy queue code', error);
-      Alert.alert('Copy failed', 'Unable to copy the queue code. Try again.');
+      alert({ title: 'Copy failed', message: 'Unable to copy the queue code. Try again.' });
     }
-  }, [code]);
+  }, [code, alert]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -742,14 +747,20 @@ export default function HostQueueScreen({ route, navigation }: Props) {
             setPosterImageUrl(normalized);
             setPosterModalVisible(true);
           } else {
-            Alert.alert('Poster unavailable', 'Unable to render poster on this device.');
+            alert({
+              title: 'Poster unavailable',
+              message: 'Unable to render poster on this device.',
+            });
           }
           return null;
         }
 
         const doc = (globalThis as any)?.document;
         if (!doc) {
-          Alert.alert('Unavailable', 'Poster downloads are only available in a web browser.');
+          alert({
+            title: 'Unavailable',
+            message: 'Poster downloads are only available in a web browser.',
+          });
           return null;
         }
 
@@ -770,7 +781,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           link.click();
           doc.body.removeChild(link);
           URL.revokeObjectURL(objectUrl);
-          Alert.alert('Poster ready', 'Check your downloads folder for the PNG file.');
+          alert({
+            title: 'Poster ready',
+            message: 'Check your downloads folder for the PNG file.',
+          });
           trackHostAction('qr_saved', {
             platform: Platform.OS,
             method: 'poster_download',
@@ -785,14 +799,14 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         return blob;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to generate poster';
-        Alert.alert('Poster failed', message);
+        alert({ title: 'Poster failed', message });
         return null;
       } finally {
         setPosterModeLoading(null);
         setPosterGenerating(false);
       }
     },
-    [buildPosterDetails, canGeneratePoster, code, posterModeLoading, qrCodeLink, trackHostAction]
+    [buildPosterDetails, code, posterModeLoading, qrCodeLink, trackHostAction, alert]
   );
 
   const handleShare = useCallback(async () => {
@@ -822,7 +836,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     if (isWeb) {
       // Web: use canvas-based poster generation
       if (!canGeneratePoster) {
-        Alert.alert('Try on web', 'Poster viewing is only available in a web browser.');
+        alert({
+          title: 'Try on web',
+          message: 'Poster viewing is only available in a web browser.',
+        });
         return;
       }
       setPosterModalVisible(true);
@@ -834,7 +851,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       setPosterImageUrl(null);
       await handleGeneratePoster(posterBlackWhite ? 'bw' : 'color', false);
     }
-  }, [isWeb, canGeneratePoster, handleGeneratePoster, posterBlackWhite]);
+  }, [isWeb, canGeneratePoster, handleGeneratePoster, posterBlackWhite, alert]);
 
   const handleCloseNativeQrModal = useCallback(() => {
     setNativeQrModalVisible(false);
@@ -848,7 +865,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       // Request permissions
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Please allow access to save photos to your gallery.');
+        alert({
+          title: 'Permission required',
+          message: 'Please allow access to save photos to your gallery.',
+        });
         setSavingQr(false);
         return;
       }
@@ -875,23 +895,23 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           if (Platform.OS === 'android') {
             ToastAndroid.show('QR code saved to gallery', ToastAndroid.SHORT);
           } else {
-            Alert.alert('Saved', 'QR code saved to your photo library.');
+            alert({ title: 'Saved', message: 'QR code saved to your photo library.' });
           }
 
           trackHostAction('qr_saved', { platform: Platform.OS, method: 'native_save' });
         } catch (error) {
           console.error('Failed to save QR code:', error);
-          Alert.alert('Save failed', 'Unable to save QR code. Please try again.');
+          alert({ title: 'Save failed', message: 'Unable to save QR code. Please try again.' });
         } finally {
           setSavingQr(false);
         }
       });
     } catch (error) {
       console.error('Failed to save QR code:', error);
-      Alert.alert('Save failed', 'Unable to save QR code. Please try again.');
+      alert({ title: 'Save failed', message: 'Unable to save QR code. Please try again.' });
       setSavingQr(false);
     }
-  }, [savingQr, code, trackHostAction]);
+  }, [savingQr, code, trackHostAction, alert]);
 
   const handleClosePosterModal = useCallback(() => {
     setPosterModalVisible(false);
@@ -909,7 +929,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       try {
         const available = await Sharing.isAvailableAsync();
         if (!available) {
-          Alert.alert('Share unavailable', 'Sharing is not available on this device.');
+          alert({
+            title: 'Share unavailable',
+            message: 'Sharing is not available on this device.',
+          });
           return;
         }
         await Sharing.shareAsync(posterImageUrl, {
@@ -923,7 +946,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to share poster';
-        Alert.alert('Share failed', message);
+        alert({ title: 'Share failed', message });
       }
       return;
     }
@@ -943,7 +966,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       link.click();
       doc.body.removeChild(link);
       URL.revokeObjectURL(objectUrl);
-      Alert.alert('Poster ready', 'Check your downloads folder for the PNG file.');
+      alert({ title: 'Poster ready', message: 'Check your downloads folder for the PNG file.' });
       trackHostAction('qr_saved', {
         platform: Platform.OS,
         method: 'poster_download',
@@ -951,9 +974,9 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to download poster';
-      Alert.alert('Download failed', message);
+      alert({ title: 'Download failed', message });
     }
-  }, [posterImageUrl, canGeneratePoster, posterBlackWhite, code, trackHostAction]);
+  }, [posterImageUrl, canGeneratePoster, posterBlackWhite, code, trackHostAction, alert]);
 
   const handleToggleBlackWhite = useCallback(async () => {
     const newMode = !posterBlackWhite;
@@ -1002,7 +1025,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to close queue';
-      Alert.alert('Unable to close queue', message);
+      alert({ title: 'Unable to close queue', message });
     } finally {
       setCloseLoading(false);
     }
@@ -1016,36 +1039,23 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     queue.length,
     sessionId,
     trackHostAction,
+    alert,
   ]);
 
   const handleCloseQueue = useCallback(() => {
     if (!hasHostAuth || closeLoading) {
       return;
     }
-    if (Platform.OS === 'web') {
-      setCloseConfirmVisibleWeb(true);
-      return;
-    }
-    Alert.alert(
-      'Close Queue',
-      'Guests will no longer be able to join once closed. Proceed?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Close Queue', style: 'destructive', onPress: () => void performCloseQueue() },
-      ],
-      { cancelable: true }
-    );
-  }, [closeLoading, hasHostAuth, performCloseQueue]);
-
-  const confirmCloseQueueWeb = useCallback(() => {
-    setCloseConfirmVisibleWeb(false);
-    void performCloseQueue();
-  }, [performCloseQueue]);
-
-  const cancelCloseQueueWeb = useCallback(() => {
-    setCloseConfirmVisibleWeb(false);
-    trackHostAction('host_close_queue_cancelled');
-  }, [trackHostAction]);
+    confirm({
+      title: 'Close Queue',
+      message: 'Guests will no longer be able to join once closed. Proceed?',
+      confirmText: 'Close Queue',
+      cancelText: 'Cancel',
+      destructive: true,
+      onConfirm: performCloseQueue,
+      onCancel: () => trackHostAction('host_close_queue_cancelled'),
+    });
+  }, [closeLoading, hasHostAuth, performCloseQueue, confirm, trackHostAction]);
 
   const handleCloseConnectionErrorModal = useCallback(() => {
     setConnectionErrorModalVisible(false);
@@ -1226,41 +1236,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       </View>
     </>
   );
-
-  const webCloseModal = isWeb ? (
-    <Modal
-      visible={closeConfirmVisibleWeb}
-      transparent
-      animationType="fade"
-      onRequestClose={cancelCloseQueueWeb}>
-      <View style={styles.webModalBackdrop}>
-        <View style={styles.webModalCard}>
-          <Text style={styles.webModalTitle}>Close Queue</Text>
-          <Text style={styles.webModalMessage}>
-            Guests will no longer be able to join once closed. Proceed?
-          </Text>
-          <View style={styles.webModalActions}>
-            <Pressable style={styles.webModalCancelButton} onPress={cancelCloseQueueWeb}>
-              <Text style={styles.webModalCancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.webModalConfirmButton,
-                closeLoading ? styles.webModalConfirmButtonDisabled : undefined,
-              ]}
-              onPress={confirmCloseQueueWeb}
-              disabled={closeLoading}>
-              {closeLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.webModalConfirmText}>Close Queue</Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  ) : null;
 
   const posterModal = (
     <Modal
@@ -1600,7 +1575,6 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const modals = (
     <>
       {posterNativeHidden}
-      {webCloseModal}
       {posterModal}
       {connectionErrorModal}
       {nativeQrModal}

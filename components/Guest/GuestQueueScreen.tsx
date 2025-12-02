@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -10,6 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { useDialog } from '../../contexts/DialogContext';
 import { Bell, Check, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -67,6 +66,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     'Narwhal',
   ];
   const { showModal } = useModal();
+  const { alert, confirm } = useDialog();
   const {
     code,
     partyId: initialPartyId,
@@ -158,7 +158,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   );
   const [pushReady, setPushReady] = useState(false);
   const [leaveLoading, setLeaveLoading] = useState(false);
-  const [leaveConfirmVisibleWeb, setLeaveConfirmVisibleWeb] = useState(false);
   const [isActive, setIsActive] = useState(true);
   const [sessionId] = useState<string | null>(initialSessionId ?? null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -168,7 +167,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const [trustSurveySubmitting, setTrustSurveySubmitting] = useState(false);
   const [eventName, setEventName] = useState<string | null>(null);
   const [metricsExpanded, setMetricsExpanded] = useState(false);
-  const isWeb = Platform.OS === 'web';
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
@@ -892,13 +890,12 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       } catch (storageError) {
         console.warn('Failed to remove joined queue from storage', storageError);
       }
-      Alert.alert('Left queue', 'You have left the queue.');
+      alert({ title: 'Left queue', message: 'You have left the queue.' });
       navigation.replace('HomeScreen');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to leave queue';
-      Alert.alert('Unable to leave queue', message);
+      alert({ title: 'Unable to leave queue', message });
     } finally {
-      setLeaveConfirmVisibleWeb(false);
       setLeaveLoading(false);
     }
   }, [
@@ -911,63 +908,22 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     aheadCount,
     queueLength,
     called,
+    alert,
   ]);
-
-  const cancelLeaveWeb = useCallback(() => {
-    if (leaveLoading) {
-      return;
-    }
-    setLeaveConfirmVisibleWeb(false);
-  }, [leaveLoading]);
 
   const confirmLeave = useCallback(() => {
     if (!code || !partyId || leaveLoading) {
       return;
     }
-    if (isWeb) {
-      setLeaveConfirmVisibleWeb(true);
-      return;
-    }
-    Alert.alert('Leave queue?', 'You will lose your place in line.', [
-      { text: 'Stay', style: 'cancel' },
-      { text: 'Leave Queue', style: 'destructive', onPress: () => void performLeave() },
-    ]);
-  }, [code, partyId, leaveLoading, performLeave, isWeb]);
-
-  const webLeaveModal = isWeb ? (
-    <Modal
-      visible={leaveConfirmVisibleWeb}
-      transparent
-      animationType="fade"
-      onRequestClose={cancelLeaveWeb}>
-      <View style={styles.webModalBackdrop}>
-        <View style={styles.webModalCard}>
-          <Text style={styles.webModalTitle}>Leave queue?</Text>
-          <Text style={styles.webModalMessage}>
-            You will lose your place in line. Are you sure you want to leave?
-          </Text>
-          <View style={styles.webModalActions}>
-            <Pressable style={styles.webModalCancelButton} onPress={cancelLeaveWeb}>
-              <Text style={styles.webModalCancelText}>Stay</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.webModalConfirmButton,
-                leaveLoading ? styles.webModalConfirmButtonDisabled : undefined,
-              ]}
-              onPress={() => void performLeave()}
-              disabled={leaveLoading}>
-              {leaveLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.webModalConfirmText}>Leave Queue</Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  ) : null;
+    confirm({
+      title: 'Leave queue?',
+      message: 'You will lose your place in line.',
+      confirmText: 'Leave Queue',
+      cancelText: 'Stay',
+      destructive: true,
+      onConfirm: () => void performLeave(),
+    });
+  }, [code, partyId, leaveLoading, performLeave, confirm]);
 
   // Render shared queue badge component
   const renderQueueBadge = () => (
@@ -1260,7 +1216,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   return (
     <SafeAreaProvider style={styles.safe}>
       {isDesktop ? <ScrollView>{renderDesktopLayout()}</ScrollView> : renderMobileLayout()}
-      {webLeaveModal}
     </SafeAreaProvider>
   );
 }

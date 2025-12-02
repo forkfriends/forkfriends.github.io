@@ -9,10 +9,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
   Switch,
   useWindowDimensions,
 } from 'react-native';
+import { useDialog } from '../../contexts/DialogContext';
 import Slider from '@react-native-community/slider';
 import DateTimePicker, {
   DateTimePickerAndroid,
@@ -85,6 +85,7 @@ function serializeTime(date: Date): string {
 
 export default function MakeQueueScreen({ navigation }: Props) {
   const { user } = useAuth();
+  const { alert } = useDialog();
   // const { openPopup } = useAd();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
@@ -529,13 +530,12 @@ export default function MakeQueueScreen({ navigation }: Props) {
 
       // Check if it's a Turnstile verification error
       if (message.includes('Turnstile verification') || message.includes('verification required')) {
-        Alert.alert(
-          'Verification Required',
-          'Please complete the Cloudflare security check below before creating a queue.',
-          [{ text: 'OK' }]
-        );
+        alert({
+          title: 'Verification Required',
+          message: 'Please complete the Cloudflare security check below before creating a queue.',
+        });
       } else {
-        Alert.alert('Unable to create queue', message);
+        alert({ title: 'Unable to create queue', message });
       }
 
       void trackEvent('queue_create_failed', {
@@ -650,7 +650,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
       {/* Max Queue Size */}
       <Text style={styles.label}>
         Max Queue Size
-          <Text style={{ color: 'red' }}> *</Text>
+        <Text style={{ color: 'red' }}> *</Text>
       </Text>
       <View style={styles.sliderRow}>
         <Text style={styles.sliderHint}>Allow up to</Text>
@@ -672,7 +672,7 @@ export default function MakeQueueScreen({ navigation }: Props) {
       {/* Open Hours */}
       <Text style={styles.label}>
         Open Hours
-          <Text style={{ color: 'red' }}> *</Text>
+        <Text style={{ color: 'red' }}> *</Text>
       </Text>
       {Platform.OS === 'web' ? (
         <View style={styles.timeRow}>

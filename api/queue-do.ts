@@ -491,6 +491,7 @@ export class QueueDO implements DurableObject {
           maxGuests: this.maxGuests,
           callDeadline: null,
           closed: this.closed,
+          eventName: this.eventName ?? undefined,
         }),
         {
           headers: {
@@ -911,6 +912,7 @@ export class QueueDO implements DurableObject {
       maxGuests: this.maxGuests,
       callDeadline: this.callDeadline,
       closed: this.closed,
+      eventName: this.eventName ?? undefined,
     };
     const key = `queue:${this.sessionId}:snapshot`;
     await this.env.QUEUE_KV.put(key, JSON.stringify(snapshot), { expirationTtl: 60 });
