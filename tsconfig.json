@@ -1,11 +1,26 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    // Keep the RN app code TypeScript-only; avoid pulling in built JS bundles that crash the checker
+    "allowJs": false,
     "strict": true,
     "baseUrl": ".",
     "paths": {
       "@assets/*": ["assets/*"], // for easily accessing assets anywhere in codebase
       "@/*": ["src/*"]
     }
-  }
+  },
+  "include": [
+    "App.tsx",
+    "components/**/*",
+    "contexts/**/*",
+    "lib/**/*",
+    "utils/**/*",
+    "types/**/*",
+    "global.css",
+    "public/**/*",
+    "assets/**/*"
+  ],
+  // Exclude the Cloudflare worker code – it has its own TS config at api/tsconfig.json
+  "exclude": ["api", "docs", "dist", "android", "ios", "node_modules"]
 }
