@@ -694,7 +694,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     advance();
   }, [advance]);
 
-  const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // use browser-compatible timeout type (number in RN/web, Timeout in Node)
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopyCode = useCallback(async () => {
     try {
