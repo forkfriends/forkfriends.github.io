@@ -19,7 +19,6 @@ import styles from './GuestQueueScreen.Styles';
 import type { RootStackParamList } from '../../types/navigation';
 import {
   API_BASE_URL,
-  buildGuestConnectUrl,
   getVapidPublicKey,
   leaveQueue,
   savePushSubscription,
@@ -195,7 +194,6 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const autoPushAttemptRef = useRef<string | null>(null);
   const etag = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const isPollingRef = useRef(false); // Prevent concurrent polls
 
   const clearReconnect = useCallback(() => {
     if (reconnectTimer.current) {
@@ -243,11 +241,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
 
   const snapshotUrl = useMemo(() => {
     if (!code || !partyId) return null;
-    const wsUrl = buildGuestConnectUrl(code, partyId);
-    return wsUrl
-      .replace('/connect', '/snapshot')
-      .replace('wss://', 'https://')
-      .replace('ws://', 'http://');
+    return `${API_BASE_URL}/api/queue/${code.toUpperCase()}/snapshot?partyId=${encodeURIComponent(partyId)}`;
   }, [code, partyId]);
 
   const handleSnapshot = useCallback(
@@ -377,17 +371,9 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       return;
     }
 
-    // Prevent concurrent polls
-    if (isPollingRef.current) {
-      return;
-    }
-    isPollingRef.current = true;
-
-    // Cancel any in-flight request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    abortControllerRef.current = new AbortController();
+    // Create a new AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const headers: HeadersInit = {};
@@ -398,13 +384,17 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       const response = await fetch(snapshotUrl, {
         headers,
         cache: 'no-store', // Bypass Safari's aggressive caching
-        signal: abortControllerRef.current.signal,
+        signal: controller.signal,
       });
+
+      // Check if this request was aborted
+      if (controller.signal.aborted) {
+        return;
+      }
 
       if (response.status === 304) {
         // No changes, connection is healthy
         setConnectionState('open');
-        isPollingRef.current = false;
         return;
       }
 
@@ -423,13 +413,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     } catch (error) {
       // Ignore abort errors
       if (error instanceof Error && error.name === 'AbortError') {
-        isPollingRef.current = false;
         return;
       }
       console.error('[GuestQueueScreen] Poll error:', error);
       setConnectionState('closed');
-    } finally {
-      isPollingRef.current = false;
     }
   }, [snapshotUrl, handleSnapshot]);
 
