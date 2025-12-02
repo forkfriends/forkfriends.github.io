@@ -559,7 +559,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
     <>
       {/* Event Name */}
       <Text style={styles.label}>
-        Event Name<span style={{ color: 'red' }}> *</span>
+        Event Name
+        <Text style={{ color: 'red' }}> *</Text>
       </Text>
       <TextInput
         placeholder="Dinner rush, pop-up, etc."
@@ -648,7 +649,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
 
       {/* Max Queue Size */}
       <Text style={styles.label}>
-        Max Queue Size<span style={{ color: 'red' }}> *</span>
+        Max Queue Size
+          <Text style={{ color: 'red' }}> *</Text>
       </Text>
       <View style={styles.sliderRow}>
         <Text style={styles.sliderHint}>Allow up to</Text>
@@ -669,7 +671,8 @@ export default function MakeQueueScreen({ navigation }: Props) {
 
       {/* Open Hours */}
       <Text style={styles.label}>
-        Open Hours<span style={{ color: 'red' }}> *</span>
+        Open Hours
+          <Text style={{ color: 'red' }}> *</Text>
       </Text>
       {Platform.OS === 'web' ? (
         <View style={styles.timeRow}>

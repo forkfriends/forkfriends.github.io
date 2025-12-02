@@ -82,10 +82,22 @@ export default StyleSheet.create({
     marginTop: 0,
     marginBottom: 40,
   },
+  titleContainerMobile: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    marginTop: 48,
+    marginBottom: 32,
+  },
   logoIcon: {
     width: 128,
     height: 128,
     marginRight: 16,
+  },
+  logoIconMobile: {
+    width: 96,
+    height: 96,
+    marginRight: 0,
+    marginBottom: 16,
   },
   logoIconDesktop: {
     width: 80,
