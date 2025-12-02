@@ -30,6 +30,13 @@
           "color": "#222222",
           "sounds": []
         }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3659178074995037~5469095890",
+          "iosAppId": "ca-app-pub-3659178074995037~7327320083"
+        }
       ]
     ],
     "orientation": "portrait",
