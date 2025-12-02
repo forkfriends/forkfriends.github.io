@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>QueueUp</title>
+    <script>
+      // Single Page Apps for GitHub Pages
+      // https://github.com/rafgraph/spa-github-pages
+      // This script takes the current URL and converts the path and query
+      // string into just a query string, and then redirects the browser
+      // to the new URL with only a query string and hash fragment.
+
+      // Determine base path: /queueup for GitHub Pages project site, empty for root
+      var isLocalhost =
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      var basePath =
+        !isLocalhost && window.location.pathname.startsWith('/queueup') ? '/queueup' : '';
+
+      // Get the path after the base path
+      var pathAfterBase = window.location.pathname;
+      if (basePath && pathAfterBase.startsWith(basePath)) {
+        pathAfterBase = pathAfterBase.slice(basePath.length);
+      }
+
+      // Build the redirect URL
+      // We encode the path and query into a single query parameter
+      var redirectUrl =
+        window.location.origin +
+        basePath +
+        '/?' +
+        'p=' +
+        encodeURIComponent(pathAfterBase + window.location.search) +
+        window.location.hash;
+
+      window.location.replace(redirectUrl);
+    </script>
+  </head>
+  <body>
+    Redirecting...
+  </body>
+</html>

@@ -7,20 +7,29 @@ type Props = {
   variant?: 'banner' | 'square' | 'vertical';
 };
 
-const TEST_BANNER_ID = 'ca-app-pub-3940256099942544/6300978111'; // Google test banner for AdMob (native)
 const TEST_ADSENSE_CLIENT = 'ca-pub-3940256099942544'; // Google test AdSense client (web)
 const TEST_ADSENSE_SLOT = '2003685630'; // Google test AdSense slot (web)
 
-type AdMobModule = {
-  AdMobBanner: React.ComponentType<any>;
-  isAvailableAsync?: () => Promise<boolean>;
-  setTestDeviceIDAsync?: (id: string | null) => Promise<void>;
+// Dynamic import types for react-native-google-mobile-ads
+type BannerAdModule = {
+  BannerAd: React.ComponentType<any>;
+  BannerAdSize: {
+    BANNER: string;
+    LARGE_BANNER: string;
+    MEDIUM_RECTANGLE: string;
+    FULL_BANNER: string;
+    LEADERBOARD: string;
+    ANCHORED_ADAPTIVE_BANNER: string;
+  };
+  TestIds: {
+    BANNER: string;
+  };
 };
 
 export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
   const isExpoGo = Constants.appOwnership === 'expo';
-  const [admobModule, setAdmobModule] = useState<AdMobModule | null>(null);
-  const [admobReady, setAdmobReady] = useState<boolean | null>(
+  const [adModule, setAdModule] = useState<BannerAdModule | null>(null);
+  const [adReady, setAdReady] = useState<boolean | null>(
     Platform.OS === 'web' || isExpoGo ? false : null
   );
 
@@ -32,24 +41,15 @@ export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
 
     (async () => {
       try {
-        const mod = (await import('expo-ads-admob')) as AdMobModule;
+        const mod = await import('react-native-google-mobile-ads');
         if (cancelled) return;
 
-        const available = (await mod.isAvailableAsync?.()) ?? false;
-        if (cancelled) return;
-
-        if (!available) {
-          setAdmobReady(false);
-          return;
-        }
-
-        setAdmobModule(mod);
-        setAdmobReady(true);
-        await mod.setTestDeviceIDAsync?.('EMULATOR');
+        setAdModule(mod as BannerAdModule);
+        setAdReady(true);
       } catch (err) {
-        console.warn('[AdBanner] AdMob unavailable, skipping native ads', err);
+        console.warn('[AdBanner] react-native-google-mobile-ads unavailable', err);
         if (!cancelled) {
-          setAdmobReady(false);
+          setAdReady(false);
         }
       }
     })();
@@ -75,7 +75,7 @@ export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
     );
   }
 
-  if (admobReady === null) {
+  if (adReady === null) {
     // Still probing availability; keep layout stable
     return (
       <View style={{ alignItems: 'center', paddingVertical: 8 }}>
@@ -84,7 +84,7 @@ export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
     );
   }
 
-  if (admobReady === false || !admobModule) {
+  if (adReady === false || !adModule) {
     return (
       <View style={{ alignItems: 'center', paddingVertical: 8 }}>
         <PlaceholderCard />
@@ -92,17 +92,33 @@ export default function AdBanner({ adUnitId, variant = 'banner' }: Props) {
     );
   }
 
-  const BannerComponent = admobModule.AdMobBanner;
-  const resolvedUnitId = adUnitId || process.env.EXPO_PUBLIC_ADMOB_BANNER_ID || TEST_BANNER_ID;
+  const { BannerAd, BannerAdSize, TestIds } = adModule;
+  const resolvedUnitId = adUnitId || process.env.EXPO_PUBLIC_ADMOB_BANNER_ID || TestIds.BANNER;
+
+  // Map variant to BannerAdSize
+  const getBannerSize = () => {
+    switch (variant) {
+      case 'square':
+        return BannerAdSize.MEDIUM_RECTANGLE; // 300x250
+      case 'vertical':
+        return BannerAdSize.LARGE_BANNER; // 320x100
+      default:
+        return BannerAdSize.ANCHORED_ADAPTIVE_BANNER;
+    }
+  };
 
   return (
     <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-      <BannerComponent
-        bannerSize="smartBannerPortrait"
-        adUnitID={resolvedUnitId}
-        servePersonalizedAds={false}
-        onDidFailToReceiveAdWithError={(error: any) => {
-          // Avoid native alerts; log for debugging
+      <BannerAd
+        unitId={resolvedUnitId}
+        size={getBannerSize()}
+        requestOptions={{
+          requestNonPersonalizedAdsOnly: true,
+        }}
+        onAdLoaded={() => {
+          console.log('[AdBanner] Ad loaded');
+        }}
+        onAdFailedToLoad={(error: any) => {
           console.warn('[AdBanner] Failed to load ad', error);
         }}
       />
@@ -201,8 +217,8 @@ function WebAdSenseBanner({ variant }: { variant: 'banner' | 'square' | 'vertica
     <View style={{ alignItems: 'center' }}>
       <View
         style={{
-          width: getDims(variant).containerWidth,
-          maxWidth: getDims(variant).maxWidth,
+          width: getDims(variant).containerWidth as any,
+          maxWidth: getDims(variant).maxWidth as any,
           minHeight: getDims(variant).minHeight,
           backgroundColor: '#f8fafc',
           borderWidth: 1,

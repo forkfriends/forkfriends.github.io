@@ -87,7 +87,6 @@ type HostMessage =
 type ConnectionState = 'connecting' | 'open' | 'closed';
 
 const POLL_INTERVAL_MS = 10000; // Poll every 10 seconds
-const RECONNECT_DELAY_MS = 3000;
 
 export default function HostQueueScreen({ route, navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -269,6 +268,8 @@ export default function HostQueueScreen({ route, navigation }: Props) {
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const etag = useRef<string | null>(null);
   const hasInitializedQueue = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isPollingRef = useRef(false); // Prevent concurrent polls
 
   // Clear ETag when entering a new queue session to ensure fresh data
   useEffect(() => {
@@ -400,6 +401,18 @@ export default function HostQueueScreen({ route, navigation }: Props) {
       return;
     }
 
+    // Prevent concurrent polls
+    if (isPollingRef.current) {
+      return;
+    }
+    isPollingRef.current = true;
+
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     try {
       const headers: HeadersInit = {
         'x-host-auth': hostToken,
@@ -410,7 +423,11 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         headers['If-None-Match'] = etag.current;
       }
 
-      const response = await fetch(snapshotUrl, { headers });
+      const response = await fetch(snapshotUrl, {
+        headers,
+        cache: 'no-store', // Bypass Safari's aggressive caching
+        signal: abortControllerRef.current.signal,
+      });
 
       if (response.status === 304) {
         // No changes, connection is healthy
@@ -418,12 +435,15 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         if (hasInitializedQueue.current) {
           setConnectionState('open');
           setConnectionError(null);
+          isPollingRef.current = false;
           return;
         }
         // If we haven't initialized yet, we need to fetch data
         // Retry without If-None-Match header to force a fresh fetch
         const retryResponse = await fetch(snapshotUrl, {
           headers: { 'x-host-auth': hostToken },
+          cache: 'no-store',
+          signal: abortControllerRef.current.signal,
         });
         if (retryResponse.ok) {
           const newEtag = retryResponse.headers.get('ETag');
@@ -437,6 +457,7 @@ export default function HostQueueScreen({ route, navigation }: Props) {
           setConnectionError(null);
           setConnectionErrorModalVisible(false);
         }
+        isPollingRef.current = false;
         return;
       }
 
@@ -457,9 +478,16 @@ export default function HostQueueScreen({ route, navigation }: Props) {
         setConnectionErrorModalVisible(true);
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') {
+        isPollingRef.current = false;
+        return;
+      }
       console.error('[HostQueueScreen] Poll error:', error);
       setConnectionError('Unable to connect to the server');
       setConnectionErrorModalVisible(true);
+    } finally {
+      isPollingRef.current = false;
     }
   }, [hasHostAuth, hostToken, snapshotUrl, handleSnapshot]);
 
@@ -487,14 +515,34 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     }, POLL_INTERVAL_MS);
   }, [hasHostAuth, clearReconnectTimeout, stopPolling, poll]);
 
-  // Immediate poll when entering an already-made queue - ensures we fetch fresh data from DB
+  // Handle visibility changes - pause polling when tab is hidden, resume when visible
   useEffect(() => {
-    if (!hasHostAuth || !snapshotUrl) {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
       return;
     }
-    // Poll immediately when we have host auth and snapshot URL ready
-    poll();
-  }, [hasHostAuth, snapshotUrl, poll]);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Tab became visible - poll immediately and restart interval
+        if (
+          hasHostAuth &&
+          snapshotUrl &&
+          !isRecoveringParams &&
+          !recoveringHostAuth &&
+          isAuthenticated
+        ) {
+          // Clear stale ETag to force fresh data after being backgrounded
+          etag.current = null;
+          poll();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [hasHostAuth, snapshotUrl, isRecoveringParams, recoveringHostAuth, isAuthenticated, poll]);
 
   useEffect(() => {
     // Don't show auth error while still recovering params from storage or host auth
@@ -515,6 +563,10 @@ export default function HostQueueScreen({ route, navigation }: Props) {
     return () => {
       clearReconnectTimeout();
       stopPolling();
+      // Cancel any in-flight requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [
     startPolling,

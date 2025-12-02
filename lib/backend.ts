@@ -345,6 +345,24 @@ export async function savePushSubscription(params: {
   }
 }
 
+/**
+ * Save Expo push token for native push notifications
+ */
+export async function saveExpoPushToken(params: {
+  sessionId: string;
+  partyId: string;
+  expoToken: string;
+}): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/push/expo-subscribe`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    throw new Error('Failed to save Expo push token');
+  }
+}
+
 export interface AdvanceQueueParams {
   code: string;
   hostAuthToken: string;

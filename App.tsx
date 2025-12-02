@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, LogOut, User, BarChart3 } from 'lucide-react-native';
+import * as Notifications from 'expo-notifications';
 import './global.css';
 
 import HomeScreen from './components/Home/HomeScreen';
@@ -35,9 +36,22 @@ import type { RootStackParamList } from './types/navigation';
 import { ModalProvider } from './contexts/ModalContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AdProvider, useAd } from './contexts/AdContext';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AdBanner from './components/Ads/AdBanner';
 // import AdPopup from './components/Ads/AdPopup';
+
+// Configure notification handler for when app is in foreground
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -335,7 +349,35 @@ function HeaderRight() {
 
 function AppNavigator() {
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const notificationListener = useRef<Notifications.Subscription | undefined>(undefined);
+  const responseListener = useRef<Notifications.Subscription | undefined>(undefined);
   // const { showPopup, closePopup } = useAd();
+
+  // Set up notification listeners for native platforms
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+
+    // Listen for incoming notifications while app is foregrounded
+    notificationListener.current = Notifications.addNotificationReceivedListener((notification) => {
+      console.log('[Notification] Received:', notification);
+    });
+
+    // Listen for notification taps
+    responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
+      console.log('[Notification] Tapped:', response);
+      // Could navigate to GuestQueueScreen here if we have queue code in notification data
+      // For now, just log - the user will see the queue status when they open the app
+    });
+
+    return () => {
+      if (notificationListener.current) {
+        notificationListener.current.remove();
+      }
+      if (responseListener.current) {
+        responseListener.current.remove();
+      }
+    };
+  }, []);
 
   // Only use documentTitle on web
   const documentTitleConfig =

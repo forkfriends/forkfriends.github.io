@@ -8,13 +8,13 @@ import {
   ScrollView,
   Text,
   View,
-  TouchableOpacity,
   useWindowDimensions,
 } from 'react-native';
-import { Bell, Check } from 'lucide-react-native';
-import { ChevronDown, ChevronUp } from 'lucide-react-native';
+import { Bell, Check, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import * as Notifications from 'expo-notifications';
+
 import styles from './GuestQueueScreen.Styles';
 import type { RootStackParamList } from '../../types/navigation';
 import {
@@ -23,6 +23,7 @@ import {
   getVapidPublicKey,
   leaveQueue,
   savePushSubscription,
+  saveExpoPushToken,
   type PushSubscriptionParams,
 } from '../../lib/backend';
 import { trackEvent, trackTrustSurveySubmitted } from '../../utils/analytics';
@@ -38,7 +39,34 @@ const POLL_INTERVAL_MS = 10000;
 const ANALYTICS_SCREEN = 'guest_queue';
 
 export default function GuestQueueScreen({ route, navigation }: Props) {
-  const anonymousNames = ['Kangaroo', 'Panda', 'Penguin', 'Dolphin', 'Elephant', 'Giraffe', 'Tiger', 'Zebra', 'Koala', 'Otter', 'Quokka', 'Lemur', 'Meerkat', 'Sloth', 'Armadillo', 'Hedgehog', 'Raccoon', 'Chameleon', 'Flamingo', 'Pelican', 'Ostrich', 'Ewe', 'Ibex', 'Lynx', 'Marmot', 'Narwhal'];
+  const anonymousNames = [
+    'Kangaroo',
+    'Panda',
+    'Penguin',
+    'Dolphin',
+    'Elephant',
+    'Giraffe',
+    'Tiger',
+    'Zebra',
+    'Koala',
+    'Otter',
+    'Quokka',
+    'Lemur',
+    'Meerkat',
+    'Sloth',
+    'Armadillo',
+    'Hedgehog',
+    'Raccoon',
+    'Chameleon',
+    'Flamingo',
+    'Pelican',
+    'Ostrich',
+    'Ewe',
+    'Ibex',
+    'Lynx',
+    'Marmot',
+    'Narwhal',
+  ];
   const { showModal } = useModal();
   const {
     code,
@@ -166,6 +194,8 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
   const shouldReconnectRef = useRef(true);
   const autoPushAttemptRef = useRef<string | null>(null);
   const etag = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isPollingRef = useRef(false); // Prevent concurrent polls
 
   const clearReconnect = useCallback(() => {
     if (reconnectTimer.current) {
@@ -347,17 +377,34 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       return;
     }
 
+    // Prevent concurrent polls
+    if (isPollingRef.current) {
+      return;
+    }
+    isPollingRef.current = true;
+
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     try {
       const headers: HeadersInit = {};
       if (etag.current) {
         headers['If-None-Match'] = etag.current;
       }
 
-      const response = await fetch(snapshotUrl, { headers });
+      const response = await fetch(snapshotUrl, {
+        headers,
+        cache: 'no-store', // Bypass Safari's aggressive caching
+        signal: abortControllerRef.current.signal,
+      });
 
       if (response.status === 304) {
         // No changes, connection is healthy
         setConnectionState('open');
+        isPollingRef.current = false;
         return;
       }
 
@@ -374,8 +421,15 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         setConnectionState('closed');
       }
     } catch (error) {
+      // Ignore abort errors
+      if (error instanceof Error && error.name === 'AbortError') {
+        isPollingRef.current = false;
+        return;
+      }
       console.error('[GuestQueueScreen] Poll error:', error);
       setConnectionState('closed');
+    } finally {
+      isPollingRef.current = false;
     }
   }, [snapshotUrl, handleSnapshot]);
 
@@ -397,6 +451,29 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     }, POLL_INTERVAL_MS);
   }, [snapshotUrl, clearReconnect, stopPolling, poll]);
 
+  // Handle visibility changes - pause polling when tab is hidden, resume when visible
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Tab became visible - poll immediately to get fresh data
+        if (snapshotUrl && isActive) {
+          // Clear stale ETag to force fresh data after being backgrounded
+          etag.current = null;
+          poll();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [snapshotUrl, isActive, poll]);
+
   useEffect(() => {
     if (!partyId || !code || !isActive) {
       return undefined;
@@ -409,6 +486,10 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
       shouldReconnectRef.current = false;
       clearReconnect();
       stopPolling();
+      // Cancel any in-flight requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [code, partyId, isActive, clearReconnect, stopPolling, startPolling]);
 
@@ -416,11 +497,21 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     return () => {
       clearReconnect();
       stopPolling();
+      // Cancel any in-flight requests on unmount
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [clearReconnect, stopPolling]);
 
   const disablePush = useCallback(async () => {
+    // Native: Currently we don't support disabling on native (would need to clear token from server)
     if (Platform.OS !== 'web') {
+      setPushReady(false);
+      showModal({
+        title: 'Notifications Disabled',
+        message: 'You will no longer receive notifications for this queue.',
+      });
       return;
     }
     if (typeof window === 'undefined' || typeof navigator === 'undefined') {
@@ -476,10 +567,95 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     }
   }, [showModal, sessionId, partyId]);
 
+  // Native push notification registration
+  const enableNativePush = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!sessionId || !partyId) {
+        return;
+      }
+
+      const logPushMetric = (
+        event: 'push_prompt_shown' | 'push_granted' | 'push_denied',
+        props?: Record<string, unknown>
+      ) => {
+        void trackEvent(event, {
+          sessionId,
+          partyId,
+          props: {
+            screen: ANALYTICS_SCREEN,
+            auto: Boolean(options?.silent),
+            platform: 'native',
+            ...(props ?? {}),
+          },
+        });
+      };
+
+      try {
+        logPushMetric('push_prompt_shown');
+
+        // Request permissions
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+
+        if (finalStatus !== 'granted') {
+          logPushMetric('push_denied', { reason: finalStatus });
+          if (!options?.silent) {
+            showModal({
+              title: 'Notifications blocked',
+              message: 'Enable notifications in your device settings to get alerts.',
+            });
+          }
+          return;
+        }
+
+        // Get the Expo push token
+        const tokenData = await Notifications.getExpoPushTokenAsync({
+          projectId: process.env.EXPO_PUBLIC_PROJECT_ID,
+        });
+        const expoToken = tokenData.data;
+
+        // Save the token to the server
+        await saveExpoPushToken({
+          sessionId,
+          partyId,
+          expoToken,
+        });
+
+        logPushMetric('push_granted');
+        setPushReady(true);
+
+        if (!options?.silent) {
+          showModal({
+            title: 'Notifications enabled',
+            message: 'We will alert you when it is your turn.',
+          });
+        }
+      } catch (e) {
+        console.warn('enableNativePush failed', e);
+        logPushMetric('push_denied', {
+          reason: e instanceof Error ? e.message : 'unknown_error',
+        });
+        if (!options?.silent) {
+          showModal({
+            title: 'Failed to enable push',
+            message: 'Please try again in a moment.',
+          });
+        }
+      }
+    },
+    [partyId, sessionId, showModal]
+  );
+
   const enablePush = useCallback(
     async (options?: { silent?: boolean }) => {
+      // Use native push for iOS/Android
       if (Platform.OS !== 'web') {
-        return;
+        return enableNativePush(options);
       }
       if (!sessionId || !partyId) {
         return;
@@ -537,9 +713,9 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             throw new Error('Invalid VAPID public key format');
           }
         };
-        const isGhPages = window.location.pathname.startsWith('/queueup');
-        const swPath = isGhPages ? '/sw.js' : '/sw.js';
-        const swScope = isGhPages ? '/' : '/';
+        // Service worker is always at root - deployed to forkfriends.github.io (not /queueup subpath)
+        const swPath = '/sw.js';
+        const swScope = '/';
         const registration = await navigator.serviceWorker.register(swPath, { scope: swScope });
         let subscription = await registration.pushManager.getSubscription();
         let subscriptionState: 'existing' | 'new' = subscription ? 'existing' : 'new';
@@ -606,11 +782,12 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
         }
       }
     },
-    [partyId, sessionId, showModal]
+    [partyId, sessionId, showModal, enableNativePush]
   );
 
+  // Auto-enable push notifications (works on both web and native)
   useEffect(() => {
-    if (!isWeb || !sessionId || !partyId || pushReady) {
+    if (!sessionId || !partyId || pushReady) {
       return;
     }
     const key = `${sessionId}:${partyId}`;
@@ -621,7 +798,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     enablePush({ silent: true }).catch(() => {
       // handled through push state
     });
-  }, [isWeb, sessionId, partyId, pushReady, enablePush]);
+  }, [sessionId, partyId, pushReady, enablePush]);
 
   useEffect(() => {
     if (!code || !partyId) {
@@ -828,9 +1005,8 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
     </View>
   );
 
-  // Render notification button (web only)
+  // Render notification button (web and native)
   const renderNotificationButton = () => {
-    if (!isWeb) return null;
     return (
       <Pressable
         style={[styles.pushButton, pushReady && styles.pushButtonActive]}
@@ -951,7 +1127,7 @@ export default function GuestQueueScreen({ route, navigation }: Props) {
             <Text style={styles.leaveButtonText}>Leave Queue</Text>
           )}
         </Pressable>
-        <AdBanner variant='square' />
+        <AdBanner variant="square" />
       </View>
     );
   };
