@@ -6,8 +6,12 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@assets/*": ["assets/*"], // for easily accessing assets anywhere in codebase
-      "@/*": ["src/*"]
+      "@assets/*": [
+        "assets/*"
+      ], // for easily accessing assets anywhere in codebase
+      "@/*": [
+        "src/*"
+      ]
     }
   },
   "include": [
@@ -19,8 +23,16 @@
     "types/**/*",
     "global.css",
     "public/**/*",
-    "assets/**/*"
+    "assets/**/*",
+    "nativewind-env.d.ts"
   ],
   // Exclude the Cloudflare worker code – it has its own TS config at api/tsconfig.json
-  "exclude": ["api", "docs", "dist", "android", "ios", "node_modules"]
+  "exclude": [
+    "api",
+    "docs",
+    "dist",
+    "android",
+    "ios",
+    "node_modules"
+  ]
 }
